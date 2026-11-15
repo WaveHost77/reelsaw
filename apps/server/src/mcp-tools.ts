@@ -838,7 +838,7 @@ export const TOOLS = {
   list_users: {
     title: "List accounts",
     description:
-      "Admins only: accounts on this instance, pending first then newest, with status (pending, active, suspended), role, whether the email address is verified (emailVerified), abuse flags, plan, last active and all-time usage. Filter with q (name or email), status, verified, flagged (any abuse flag) or flag (one reason: shared_ip, signup_burst, disposable_email). Returns { items, nextCursor, total }; pass nextCursor for the next page (a search returns its best 100 in one page). groupBy flag splits the same matches into sections, one per abuse reason then the unflagged, each with its total, first limit accounts and the filter to page it (list_users) or act on it (manage_users). Hosted non-admins are refused.",
+      "Admins only: accounts, pending first then newest, with status, role, emailVerified, abuse flags, plan, last active and all-time usage. Filter with q (name or email), status, verified, flagged or flag (one reason). Returns { items, nextCursor, total }; pass nextCursor for the next page (a search returns its best 100). groupBy flag returns the matches in sections instead, one per reason then the unflagged (see groupBy). Hosted non-admins are refused.",
     inputSchema: userListToolInput.shape,
     annotations: { readOnlyHint: true },
   },

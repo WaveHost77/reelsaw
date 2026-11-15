@@ -29,7 +29,10 @@ export const userFilterSchema = z.object({
       'Only accounts a sign-up rule held for approval, by the rule as list_signup_rules shows it (kind and pattern: "ip 203.0.113.0/24"), whatever their status now',
     ),
   group: z
-    .object({ by: z.enum(USER_GROUP_BY), key: z.enum(FLAG_GROUPS) })
+    .object({
+      by: z.enum(USER_GROUP_BY).describe("flag: the sections of list_users groupBy flag"),
+      key: z.enum(FLAG_GROUPS).describe("The section: an abuse flag, or none for the accounts with no flag"),
+    })
     .optional()
     .describe(
       "Only the accounts in one section of list_users groupBy, on top of the other fields: by flag, key = shared_ip, signup_burst, disposable_email or none (not flagged). Each group list_users returns carries its own filter with this set",

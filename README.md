@@ -619,7 +619,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `get_queue` | Admins only: waiting, running and retrying job counts per pipeline stage with when the longest wait began (oldestWaitingAt), plus the jobs currently in flight (project title, attempt, started, and a retrying job's lastError). |
 | `list_failures` | Admins only: failed projects and clips across the instance (owner email, stage, reason, when). |
 | `retry_failures` | Admins only: retry matching failed projects and clips through the same lifecycle as retry_project / rerender_clip (never a raw queue poke). |
-| `list_users` | Admins only: accounts on this instance, pending first then newest, with status (pending, active, suspended), role, whether the email address is verified (emailVerified), abuse flags, plan, last active and all-time usage. |
+| `list_users` | Admins only: accounts, pending first then newest, with status, role, emailVerified, abuse flags, plan, last active and all-time usage. |
 | `manage_users` | Admins only: approve, hold, suspend, reinstate or delete many accounts, by ids or every match of filter (as list_users). |
 | `list_signup_rules` | Admins only: the sign-up rules in front of SIGNUP_MODE, oldest first (at most 500). |
 | `manage_signup_rules` | Admins only: add and remove sign-up rules in one call (ids from list_signup_rules). |
