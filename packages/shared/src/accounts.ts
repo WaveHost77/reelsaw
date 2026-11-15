@@ -145,3 +145,23 @@ export function signupCreatedNotice(mode: "open" | "approval" | "closed"): strin
   const rest = `${CONFIRM_EMAIL_THEN_SIGN_IN} ${REPEAT_SIGN_UP_KEEPS_FIRST_PASSWORD}`;
   return mode === "approval" ? `${PENDING_APPROVAL_MESSAGE} ${rest}` : rest;
 }
+
+/**
+ * Why the hourly abuse pass flagged an account (`user.flags`, abuse.ts). One list for the server's filter and
+ * sign-up rules and the Users page's chips and "Flag" filter, so a new reason shows up everywhere at once.
+ */
+export const ABUSE_FLAGS = ["shared_ip", "signup_burst", "disposable_email"] as const;
+export type AbuseFlag = (typeof ABUSE_FLAGS)[number];
+export const isAbuseFlag = (v: unknown): v is AbuseFlag => ABUSE_FLAGS.some((f) => f === v);
+/** Short name: the chip and the filter option. */
+export const FLAG_LABEL: Record<AbuseFlag, string> = {
+  shared_ip: "shared ip",
+  signup_burst: "signup burst",
+  disposable_email: "disposable email",
+};
+/** One sentence each: the chip's title, the CLI legend. */
+export const FLAG_HELP: Record<AbuseFlag, string> = {
+  shared_ip: "three or more accounts signed up from the same address in the last 7 days",
+  signup_burst: "five or more accounts from the same address within one hour",
+  disposable_email: "the email domain is a known temporary-address service",
+};

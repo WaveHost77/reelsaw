@@ -1,4 +1,4 @@
-import { EMAIL_TOPIC_NAMES, EMAIL_TOPICS, type EmailTopic } from "@reelsaw/shared";
+import { ABUSE_FLAGS, EMAIL_TOPIC_NAMES, EMAIL_TOPICS, type EmailTopic, isAbuseFlag } from "@reelsaw/shared";
 import { emailPreferences, setEmailPreferences } from "./notify/preferences.js";
 import { describeRun, runsOfProject } from "./pipeline/runs.js";
 /**
@@ -11,7 +11,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  * Commands
  *   version [--json]                        running version, latest published release, how to upgrade
  *   releases [--json] [--limit n]           published versions from GitHub (reelsaw.com/releases / list_releases)
- *   users [--q text] [--status s] [--verified yes|no] [--flagged yes] [--held rule] [--limit n] [--cursor c] [--json]
+ *   users [--q text] [--status s] [--verified yes|no] [--flagged yes] [--flag shared_ip|signup_burst|disposable_email] [--held rule] [--limit n] [--cursor c] [--json]
  *                                           list accounts a page at a time: role, status, email verified, sign-up date
  *   users-bulk <approve|hold|suspend|reinstate|delete> (<email…> | --all | filter flags) [--reason text]
  *                                           act on many accounts (same as the Users selection bar and manage_users);
@@ -285,7 +285,7 @@ const flag = (name: string) => {
 };
 const pos = args.filter((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1]!.startsWith("--")));
 
-/** `--q`, `--status`, `--verified yes|no`, `--flagged yes` as the Users page filter (accounts-schema.ts). */
+/** `--q`, `--status`, `--verified yes|no`, `--flagged yes`, `--flag reason` as the Users page filter (accounts-schema.ts). */
 function userFilterFlags(): UserFilter {
   const f: UserFilter = {};
   const yesNo = (name: string) => {
@@ -306,6 +306,11 @@ function userFilterFlags(): UserFilter {
   const verified = yesNo("verified");
   if (verified !== undefined) f.verified = verified;
   if (yesNo("flagged")) f.flagged = true;
+  const reason = flag("flag");
+  if (reason !== undefined) {
+    if (!isAbuseFlag(reason)) throw new Error(`--flag takes ${ABUSE_FLAGS.join(", ")}`);
+    f.flag = reason;
+  }
   const held = flag("held");
   if (held) f.heldBy = held;
   return f;
@@ -498,7 +503,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
    * a command typed by name is its own confirmation, so it walks every page.
    */
   async ["users-bulk"](svc) {
-    const usage = `usage: reelsaw users-bulk <${BULK_USER_ACTIONS.join("|")}> (<email…> | --all | [--q text] [--status ${USER_STATUSES.join("|")}] [--verified yes|no] [--flagged yes] [--held rule]) [--reason text] [--json]`;
+    const usage = `usage: reelsaw users-bulk <${BULK_USER_ACTIONS.join("|")}> (<email…> | --all | [--q text] [--status ${USER_STATUSES.join("|")}] [--verified yes|no] [--flagged yes] [--flag reason] [--held rule]) [--reason text] [--json]`;
     const action = BULK_USER_ACTIONS.find((a) => a === pos[0]);
     if (!action) throw new Error(usage);
     const emails = pos.slice(1);

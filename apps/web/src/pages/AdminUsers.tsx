@@ -6,7 +6,7 @@ import { useMe } from "../lib/account";
 import { readHash, useHashParams, writeHash } from "../lib/hash";
 import { Users } from "lucide-react";
 import { toast } from "sonner";
-import { formatBytes } from "@reelsaw/shared";
+import { ABUSE_FLAGS, type AbuseFlag, FLAG_HELP, FLAG_LABEL, formatBytes, isAbuseFlag } from "@reelsaw/shared";
 import { ago } from "../lib/time";
 import { ScrollArea } from "../components/scroll-area";
 import {
@@ -60,11 +60,13 @@ type Row = {
   heldBy: string | null;
   mustChangePassword: boolean;
 };
-const FLAG_HELP: Record<string, string> = {
-  shared_ip: "Three or more accounts signed up from the same address in the last 7 days",
-  signup_burst: "Five or more accounts from the same address within one hour",
-  disposable_email: "The email domain is a known temporary-address service",
+/** The "Flag" filter: any reason, or one. In the hash as flagged=1 or flag=shared_ip. */
+type FlagFilter = "" | "any" | AbuseFlag;
+const readFlag = (h: URLSearchParams): FlagFilter => {
+  const f = h.get("flag");
+  return isAbuseFlag(f) ? f : h.get("flagged") === "1" ? "any" : "";
 };
+const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 type SortKey = "name" | "status" | "projects" | "sourceMinutes" | "clipsRendered" | "storedBytes" | "lastActive";
 
 const STATUS: Record<Status, { glyph: string; tone: string; word: string }> = {
@@ -115,7 +117,7 @@ const asYesNo = (v: string | null): "yes" | "no" | "" => (v === "yes" || v === "
 /**
  * Admin: who may use this instance. Pending accounts first; every action is one click, plus a confirm for the
  * risky ones (PRINCIPLES: "Confirm risky changes"). Search and filters run on the server and live in the hash
- * (#q=…&status=pending&verified=no&flagged=1). Rows are selectable; the selection bar acts on the checked
+ * (#q=…&status=pending&verified=no&flag=shared_ip). Rows are selectable; the selection bar acts on the checked
  * rows, or on every account matching the filters ("Select all 1,204"), in pages of 50 on the server.
  */
 export function AdminUsersPage() {
@@ -124,7 +126,7 @@ export function AdminUsersPage() {
   const qc = useQueryClient();
   const me = useMe();
   const [search, setSearch] = useState(() => readHash().get("q") ?? "");
-  const [flaggedOnly, setFlaggedOnly] = useState(() => readHash().get("flagged") === "1");
+  const [flag, setFlag] = useState<FlagFilter>(() => readFlag(readHash()));
   const [status, setStatus] = useState<Status | "">(() => asStatus(readHash().get("status")));
   const [verified, setVerified] = useState<"yes" | "no" | "">(() => asYesNo(readHash().get("verified")));
   /** only the accounts one sign-up rule held ("ip 203.0.113.0/24"), from the rule's link in Settings */
@@ -146,7 +148,7 @@ export function AdminUsersPage() {
   useEffect(() => {
     const h = new URLSearchParams(hashKey);
     setSearch(h.get("q") ?? "");
-    setFlaggedOnly(h.get("flagged") === "1");
+    setFlag(readFlag(h));
     setStatus(asStatus(h.get("status")));
     setVerified(asYesNo(h.get("verified")));
     setHeldBy(h.get("held") ?? "");
@@ -155,19 +157,27 @@ export function AdminUsersPage() {
   const filter = useMemo(
     () => ({
       q: q || undefined,
-      flagged: flaggedOnly || undefined,
+      flagged: flag === "any" || undefined,
+      flag: flag && flag !== "any" ? flag : undefined,
       status: status || undefined,
       verified: verified ? verified === "yes" : undefined,
       heldBy: heldBy || undefined,
     }),
-    [q, flaggedOnly, status, verified, heldBy],
+    [q, flag, status, verified, heldBy],
   );
   useEffect(() => {
-    writeHash({ q: q || null, flagged: flaggedOnly ? 1 : null, status: status || null, verified: verified || null, held: heldBy || null });
+    writeHash({
+      q: q || null,
+      flagged: flag === "any" ? 1 : null,
+      flag: flag && flag !== "any" ? flag : null,
+      status: status || null,
+      verified: verified || null,
+      held: heldBy || null,
+    });
     // a selection made under other filters is not what the new list shows
     setSel([]);
     setAllMatching(false);
-  }, [q, flaggedOnly, status, verified, heldBy]);
+  }, [q, flag, status, verified, heldBy]);
   // server-side paging; each account carries its all-time usage, so there is no separate usage query
   const list = useInfiniteQuery(
     trpc.admin.users.list.infiniteQueryOptions(
@@ -177,6 +187,16 @@ export function AdminUsersPage() {
   );
   // counted over every account, not the loaded page
   const pendingCount = useQuery(trpc.admin.users.pendingCount.queryOptions());
+  const flagCounts = useQuery(trpc.admin.users.flagCounts.queryOptions());
+  const flagOptions = useMemo(() => {
+    const c = flagCounts.data;
+    const n = (k: "any" | AbuseFlag) => (c ? ` (${num.format(c[k])})` : "");
+    return [
+      { value: "", label: "Any flags" },
+      { value: "any", label: `Flagged${n("any")}` },
+      ...ABUSE_FLAGS.map((f) => ({ value: f, label: `${sentence(FLAG_LABEL[f])}${n(f)}` })),
+    ];
+  }, [flagCounts.data]);
   const refresh = () => void qc.invalidateQueries({ queryKey: trpc.admin.users.pathKey() });
   const done = (msg: string) => () => {
     toast(msg);
@@ -319,7 +339,7 @@ export function AdminUsersPage() {
     { label: "Active", width: "min-[1040px]:w-[6.5rem]", full: true, sort: sortable("lastActive") },
     { label: null, srLabel: "Actions", width: "w-14 min-[1040px]:w-[14rem]" },
   ];
-  const filtered = !!(flaggedOnly || status || verified || heldBy);
+  const filtered = !!(flag || status || verified || heldBy);
 
   return (
     <ListPage
@@ -340,15 +360,13 @@ export function AdminUsersPage() {
               <span className="sr-only">Clear this filter</span>
             </button>
           )}
-          <button
-            type="button"
-            className={`btn-ghost h-[38px] min-w-[7.5rem] text-xs ${flaggedOnly ? "bg-sunk font-semibold" : ""}`}
-            aria-pressed={flaggedOnly}
-            onClick={() => setFlaggedOnly(!flaggedOnly)}
-            title="Accounts the hourly abuse pass marked: shared sign-up address, bursts, temporary domains"
-          >
-            {flaggedOnly ? "◆ Flagged only" : "◇ Flagged only"}
-          </button>
+          <Select
+            className="h-[38px] w-[12rem]"
+            ariaLabel="Abuse flag"
+            value={flag}
+            onValueChange={(v) => setFlag(v === "any" || isAbuseFlag(v) ? v : "")}
+            options={flagOptions}
+          />
           <Select className="h-[38px] w-[8.5rem]" ariaLabel="Status" value={status} onValueChange={(v) => setStatus(asStatus(v))} options={STATUS_OPTIONS} />
           <Select
             className="h-[38px] w-[8.5rem]"
@@ -464,14 +482,17 @@ export function AdminUsersPage() {
                           held · {r.heldBy.split(" ")[0]}
                         </button>
                       )}
-                      {r.flags.map((f) => (
-                        <span
+                      {/* a click lists everyone flagged for the same reason */}
+                      {r.flags.filter(isAbuseFlag).map((f) => (
+                        <button
+                          type="button"
                           key={f}
-                          className="chip shrink-0 bg-warn-soft text-warn"
-                          title={`${FLAG_HELP[f] ?? f}${r.signupIp ? ` · signed up from ${r.signupIp}` : ""}`}
+                          className="chip shrink-0 bg-warn-soft text-warn hover:brightness-110"
+                          onClick={() => setFlag(f)}
+                          title={`${sentence(FLAG_HELP[f])}${r.signupIp ? ` · signed up from ${r.signupIp}` : ""}. Click to list everyone flagged for this.`}
                         >
-                          ⚑ {f.replace(/_/g, " ")}
-                        </span>
+                          ⚑ {FLAG_LABEL[f]}
+                        </button>
                       ))}
                       {self && <span className="shrink-0 text-xs text-ink3">(you)</span>}
                     </div>

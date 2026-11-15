@@ -70,7 +70,7 @@ import {
 import { peekUrlMeta } from "../projects/peek.js";
 import { deletedItemRefSchema, listDeleted, purgeDeleted, restoreDeleted } from "../deleted.js";
 import { USER_ROLES } from "../db/schema.js";
-import { listUsers } from "../accounts-list.js";
+import { flagCounts, listUsers } from "../accounts-list.js";
 import { bulkUsersInput, userListInput } from "../accounts-schema.js";
 import { listSignupRulesInput, manageSignupRulesInput } from "../signup-rules-schema.js";
 import { changeSignupRules, listSignupRules } from "../signup-rules.js";
@@ -1008,6 +1008,8 @@ const restRouter = router({
           .where(sql`jsonb_array_length(${schema.user.flags}) > 0 and not ${schema.user.banned}`);
         return n;
       }),
+      /** accounts per abuse flag and with any flag, for the Users page's "Flag" filter (accounts-list.ts) */
+      flagCounts: adminProcedure.query(({ ctx }) => flagCounts(ctx.svc.database.db)),
       pendingCount: adminProcedure.query(async ({ ctx }) => {
         const [{ n } = { n: 0 }] = await ctx.svc.database.db
           .select({ n: sql<number>`count(*)::int` })

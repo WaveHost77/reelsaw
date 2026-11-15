@@ -337,8 +337,8 @@ form starts from them and can save its current values back. Admins also see the 
 with `HEALTH_DETAILS=true`).
 
 The Users page lists accounts a page at a time, pending first, with whether each email address is
-verified; search and the status, verification and "Flagged only" filters run in the database and stay in
-the link. Check rows (or "Select all" to take every match, not only the loaded page) to approve,
+verified; search and the status, verification and flag filters (any flag, or one reason such as shared ip; a
+flag chip lists everyone flagged for that reason) run in the database and stay in the link. Check rows (or "Select all" to take every match, not only the loaded page) to approve,
 require approval again, suspend, reinstate or delete them together; each account goes through the same checks as one at a
 time (never yourself, never the last admin) and anything refused is listed with the reason. The same
 list and actions are `list_users` / `manage_users` over MCP and `reelsaw users` / `reelsaw users-bulk`
@@ -413,7 +413,7 @@ them), so a single-user box stays as it is:
   account per real mailbox (`john.doe+x@gmail.com` is `johndoe@gmail.com`); `MAX_REQUESTS_PER_MINUTE`
   / `_HOUR` cap changes (API mutations, MCP tool calls) per account, with plan and per-user
   overrides like the other quotas. An hourly pass flags accounts that
-  share a sign-up address, arrive in bursts or use a temporary domain; the Users page shows the flags ("Flagged only"), `reelsaw abuse` lists them, and nothing is
+  share a sign-up address, arrive in bursts or use a temporary domain; the Users page shows the flags and filters by reason, `reelsaw abuse` lists them, and nothing is
   suspended automatically; a sign-up rule on a flag (`flag shared_ip hold`) sends new matches to approval. Every refusal is a sentence.
 - **yt-dlp from a datacentre**: YouTube refuses many cloud IPs. `YTDLP_PROXY` is one URL
   or an operator-ranked pool (a home Pi, a cheap VPS, a paid proxy). `{session}` in a URL is
@@ -659,7 +659,7 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | --- | --- |
 | `reelsaw version [--json]` | running version, latest published release, how to upgrade |
 | `reelsaw releases [--json] [--limit n]` | published versions from GitHub (reelsaw.com/releases / list_releases) |
-| `reelsaw users [--q text] [--status s] [--verified yes\|no] [--flagged yes] [--held rule] [--limit n] [--cursor c] [--json]` | list accounts a page at a time: role, status, email verified, sign-up date |
+| `reelsaw users [--q text] [--status s] [--verified yes\|no] [--flagged yes] [--flag shared_ip\|signup_burst\|disposable_email] [--held rule] [--limit n] [--cursor c] [--json]` | list accounts a page at a time: role, status, email verified, sign-up date |
 | `reelsaw users-bulk <approve\|hold\|suspend\|reinstate\|delete> (<email…> \| --all \| filter flags) [--reason text]` | act on many accounts (same as the Users selection bar and manage_users); hold sends active ones back to approval; filter flags as for `users` (--held "ip 203.0.113.0/24": accounts that sign-up rule held); delete is forever |
 | `reelsaw approve <email>` | approve a waiting account (when email is off or the admin is locked out) |
 | `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |

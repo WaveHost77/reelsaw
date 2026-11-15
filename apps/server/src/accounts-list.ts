@@ -6,6 +6,7 @@
 import { and, desc, inArray, sql, type SQL } from "drizzle-orm";
 import type { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { ABUSE_FLAGS, type AbuseFlag, isAbuseFlag } from "@reelsaw/shared";
 import { schema, type Db } from "./db/index.js";
 import type { Services } from "./services.js";
 import { decodeCursor, pageOf } from "./pagination.js";
@@ -33,10 +34,25 @@ export function userFilterWhere(f: Omit<UserFilter, "q">): SQL | undefined {
           : undefined;
   return and(
     f.flagged ? sql`jsonb_array_length(${U.flags}) > 0` : undefined,
+    f.flag ? sql`${U.flags} @> ${JSON.stringify([f.flag])}::jsonb` : undefined,
     status,
     f.verified === undefined ? undefined : sql`${U.emailVerified} = ${f.verified}`,
     f.heldBy ? sql`${U.heldBy} = ${f.heldBy}` : undefined,
   );
+}
+
+/**
+ * How many accounts carry each flag, and how many carry any: the Users page's "Flag" filter options. Every
+ * account counts, suspended ones too, so a number is what picking that option lists.
+ */
+export async function flagCounts(db: Db): Promise<{ any: number } & Record<AbuseFlag, number>> {
+  const [byFlag, [{ any } = { any: 0 }]] = await Promise.all([
+    db.execute<{ flag: string; n: number }>(sql`select f as flag, count(*)::int as n from ${U}, jsonb_array_elements_text(${U.flags}) as f group by f`),
+    db.select({ any: sql<number>`count(*)::int` }).from(U).where(sql`jsonb_array_length(${U.flags}) > 0`),
+  ]);
+  const out = { any, ...Object.fromEntries(ABUSE_FLAGS.map((f) => [f, 0])) } as { any: number } & Record<AbuseFlag, number>;
+  for (const r of byFlag.rows) if (isAbuseFlag(r.flag)) out[r.flag] = Number(r.n);
+  return out;
 }
 
 /**

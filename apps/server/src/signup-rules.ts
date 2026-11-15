@@ -25,7 +25,8 @@ import { schema, type Db } from "./db/index.js";
 import type { SignupRuleRow } from "./db/schema.js";
 import type { Services } from "./services.js";
 import type { Logger } from "./log.js";
-import { ABUSE_FLAGS, type AbuseFlag, emailDomain, emailKey, isDisposable } from "./abuse.js";
+import { ABUSE_FLAGS, type AbuseFlag, isAbuseFlag } from "@reelsaw/shared";
+import { emailDomain, emailKey, isDisposable } from "./abuse.js";
 import { takeTxLock, txLock } from "./locks.js";
 import { MAX_SIGNUP_RULES, type ListSignupRulesInput, type ManageSignupRulesInput, type SignupRuleAction, type SignupRuleKind } from "./signup-rules-schema.js";
 
@@ -39,8 +40,6 @@ export const SIGNUP_BLOCKED_MESSAGE = "This sign-up cannot be accepted. If you t
 
 /** How a rule reads in a list, a log line, an event and `user.held_by`: "ip 203.0.113.0/24". */
 export const ruleLabel = (r: Pick<SignupRule, "kind" | "pattern">) => `${r.kind} ${r.pattern}`;
-
-const isFlag = (v: string): v is AbuseFlag => ABUSE_FLAGS.some((f) => f === v);
 
 /** A client address as the rules compare it: an IPv4 address mapped into IPv6 (`::ffff:1.2.3.4`) is the IPv4 address. */
 function plainIp(ip: string): string {
@@ -76,7 +75,7 @@ export function normalizePattern(kind: SignupRuleKind, raw: string): { pattern: 
       return { pattern: d };
     }
     case "flag":
-      return isFlag(p) ? { pattern: p } : { error: `“${raw}” is not a flag. Use one of: ${ABUSE_FLAGS.join(", ")}.` };
+      return isAbuseFlag(p) ? { pattern: p } : { error: `“${raw}” is not a flag. Use one of: ${ABUSE_FLAGS.join(", ")}.` };
   }
 }
 

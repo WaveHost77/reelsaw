@@ -4,6 +4,7 @@
  * stdio bridge) can import it without the services behind it.
  */
 import { z } from "zod";
+import { ABUSE_FLAGS } from "@reelsaw/shared";
 
 export const USER_STATUSES = ["pending", "active", "suspended"] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
@@ -11,7 +12,13 @@ export type UserStatus = (typeof USER_STATUSES)[number];
 /** Which accounts: the Users page's search and filters. Every field narrows; none = every account. */
 export const userFilterSchema = z.object({
   q: z.string().max(200).optional().describe("Name or email words, typo-tolerant (every word must match)"),
-  flagged: z.boolean().optional().describe("Only accounts the hourly abuse pass flagged"),
+  flagged: z.boolean().optional().describe("Only accounts the hourly abuse pass flagged, for any reason"),
+  flag: z
+    .enum(ABUSE_FLAGS)
+    .optional()
+    .describe(
+      "Only accounts flagged for this reason: shared_ip (3+ sign-ups from one address in 7 days), signup_burst (5+ in an hour), disposable_email (temporary-address domain)",
+    ),
   status: z.enum(USER_STATUSES).optional().describe("pending = waiting for approval, active, suspended"),
   verified: z.boolean().optional().describe("true = email address confirmed, false = not confirmed yet"),
   heldBy: z

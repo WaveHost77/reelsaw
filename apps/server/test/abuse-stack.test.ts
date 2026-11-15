@@ -116,6 +116,15 @@ describe("abuse guards", () => {
     const ours = list.items.filter((x) => x.signupIp === ip);
     assert.equal(ours.length, 3);
     for (const x of ours) assert.ok(x.flags.includes("shared_ip"), x.flags.join(","));
+    // one reason at a time: the same accounts under shared_ip, none of them under disposable_email
+    const byReason = async (flag: string) =>
+      ((await trpc(admin.cookie, "admin.users.list", { flag, limit: 100 }, "GET")).data as { items: Array<{ signupIp: string | null }> }).items.filter(
+        (x) => x.signupIp === ip,
+      ).length;
+    assert.equal(await byReason("shared_ip"), 3);
+    assert.equal(await byReason("disposable_email"), 0);
+    const counts = (await trpc(admin.cookie, "admin.users.flagCounts", undefined, "GET")).data as Record<string, number>;
+    assert.ok(counts.shared_ip! >= 3 && counts.any! >= counts.shared_ip!, JSON.stringify(counts));
     const ev = await pool.query(`select count(*)::int as n from events where type = 'user.flagged' and user_id = any($1)`, [made.slice(-3)]);
     assert.equal(ev.rows[0].n, 3);
   });
