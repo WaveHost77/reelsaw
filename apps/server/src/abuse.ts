@@ -15,7 +15,7 @@
  */
 import { and, eq, gte, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { ACCOUNT_EXISTS_MESSAGE } from "@reelsaw/shared";
+import { ACCOUNT_EXISTS_MESSAGE, type AbuseFlag } from "@reelsaw/shared";
 import disposable from "disposable-email-domains/index.json" with { type: "json" };
 import { schema, type Db } from "./db/index.js";
 import type { Services } from "./services.js";
@@ -168,13 +168,7 @@ export async function pruneRequestRate(db: Db): Promise<number> {
   return Number(r.rowCount ?? 0);
 }
 
-export const ABUSE_FLAGS = ["shared_ip", "signup_burst", "disposable_email"] as const;
-export type AbuseFlag = (typeof ABUSE_FLAGS)[number];
-export const FLAG_HELP: Record<AbuseFlag, string> = {
-  shared_ip: "three or more accounts signed up from the same address in the last 7 days",
-  signup_burst: "five or more accounts from the same address within one hour",
-  disposable_email: "the email domain is a known temporary-address service",
-};
+export { ABUSE_FLAGS, FLAG_HELP, type AbuseFlag } from "@reelsaw/shared";
 
 /**
  * Recompute the flags of recent accounts (hourly). Idempotent: the computed set replaces the stored one, and an
