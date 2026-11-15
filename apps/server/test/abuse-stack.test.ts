@@ -7,7 +7,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { ACCOUNT_EXISTS_MESSAGE } from "@reelsaw/shared";
+import { ACCOUNT_EXISTS_MESSAGE, FLAG_GROUPS } from "@reelsaw/shared";
 import { BASE, db, postSignUp, signUp } from "./helpers.js";
 
 const json = { "content-type": "application/json", origin: BASE };
@@ -125,6 +125,28 @@ describe("abuse guards", () => {
     assert.equal(await byReason("disposable_email"), 0);
     const counts = (await trpc(admin.cookie, "admin.users.flagCounts", undefined, "GET")).data as Record<string, number>;
     assert.ok(counts.shared_ip! >= 3 && counts.any! >= counts.shared_ip!, JSON.stringify(counts));
+    // grouped by flag: sections in FLAG_GROUPS order, ours in shared_ip, and a section's filter lists exactly it
+    type Section = { key: string; total: number; filter: Record<string, unknown>; items: Array<{ signupIp: string | null; flags: string[] }> };
+    const g = (await trpc(admin.cookie, "admin.users.groups", { by: "flag", limit: 100 }, "GET")).data as { total: number; groups: Section[] };
+    const keys = g.groups.map((s) => s.key);
+    assert.deepEqual(
+      keys,
+      FLAG_GROUPS.filter((k) => keys.includes(k)),
+    );
+    const shared = g.groups.find((s) => s.key === "shared_ip");
+    assert.ok(shared && shared.total >= 3, JSON.stringify(keys));
+    assert.equal(shared.items.filter((x) => x.signupIp === ip).length, 3);
+    for (const s of g.groups) for (const x of s.items) assert.ok(s.key === "none" ? x.flags.length === 0 : x.flags.includes(s.key), `${x.flags} in ${s.key}`);
+    assert.ok(
+      g.groups.every((s) => s.total <= g.total),
+      "a section never holds more than the whole list",
+    );
+    const inSection = (await trpc(admin.cookie, "admin.users.list", { ...shared.filter, limit: 100 }, "GET")).data as { total: number };
+    assert.equal(inSection.total, shared.total);
+    const unflagged = (await trpc(admin.cookie, "admin.users.list", { group: { by: "flag", key: "none" }, limit: 100 }, "GET")).data as {
+      items: Array<{ signupIp: string | null; flags: string[] }>;
+    };
+    assert.ok(unflagged.items.every((x) => x.flags.length === 0 && x.signupIp !== ip));
     const ev = await pool.query(`select count(*)::int as n from events where type = 'user.flagged' and user_id = any($1)`, [made.slice(-3)]);
     assert.equal(ev.rows[0].n, 3);
   });

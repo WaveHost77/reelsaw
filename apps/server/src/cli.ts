@@ -1,4 +1,14 @@
-import { ABUSE_FLAGS, EMAIL_TOPIC_NAMES, EMAIL_TOPICS, type EmailTopic, isAbuseFlag } from "@reelsaw/shared";
+import {
+  ABUSE_FLAGS,
+  EMAIL_TOPIC_NAMES,
+  EMAIL_TOPICS,
+  type EmailTopic,
+  FLAG_GROUPS,
+  isAbuseFlag,
+  isFlagGroup,
+  isUserGroupBy,
+  USER_GROUP_BY,
+} from "@reelsaw/shared";
 import { emailPreferences, setEmailPreferences } from "./notify/preferences.js";
 import { describeRun, runsOfProject } from "./pipeline/runs.js";
 /**
@@ -11,8 +21,11 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  * Commands
  *   version [--json]                        running version, latest published release, how to upgrade
  *   releases [--json] [--limit n]           published versions from GitHub (reelsaw.com/releases / list_releases)
- *   users [--q text] [--status s] [--verified yes|no] [--flagged yes] [--flag shared_ip|signup_burst|disposable_email] [--held rule] [--limit n] [--cursor c] [--json]
+ *   users [--q text] [--status s] [--verified yes|no] [--flagged yes] [--flag shared_ip|signup_burst|disposable_email] [--held rule] [--in shared_ip|…|none] [--limit n] [--cursor c] [--json]
  *                                           list accounts a page at a time: role, status, email verified, sign-up date
+ *   users --group flag [filter flags] [--limit n] [--json]
+ *                                           the same list in sections, one per abuse flag then the unflagged, each with
+ *                                           its count (Users page "Group by flag", list_users groupBy); --in <key> takes one section
  *   users-bulk <approve|hold|suspend|reinstate|delete> (<email…> | --all | filter flags) [--reason text]
  *                                           act on many accounts (same as the Users selection bar and manage_users);
  *                                           hold sends active ones back to approval; filter flags as for `users`
@@ -206,7 +219,7 @@ import readline from "node:readline";
 import { clipCaptionsFile, importTranscript, projectTranscriptFile, type CaptionFormat } from "./transcript-files.js";
 import { createServices, shutdownServices, type Services } from "./services.js";
 import { approveUser, bulkUsers, setUserPassword, setUserRole, setUserWatermark } from "./accounts.js";
-import { listUsers } from "./accounts-list.js";
+import { listUsers, userGroups } from "./accounts-list.js";
 import { BULK_USER_ACTIONS, BULK_USERS, USER_STATUSES, type UserFilter } from "./accounts-schema.js";
 import { LIMIT_KEYS, limitsFor, limitUsage, usageByUser, watermarkFor } from "./quota.js";
 import { testModel } from "./ai/model-test.js";
@@ -313,6 +326,11 @@ function userFilterFlags(): UserFilter {
   }
   const held = flag("held");
   if (held) f.heldBy = held;
+  const section = flag("in");
+  if (section !== undefined) {
+    if (!isFlagGroup(section)) throw new Error(`--in takes a section of --group flag: ${FLAG_GROUPS.join(", ")}`);
+    f.group = { by: "flag", key: section };
+  }
   return f;
 }
 
@@ -482,6 +500,30 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
   },
   /** Accounts, a page at a time (same list as the Users page and list_users): role, status, verified, sign-up date. */
   async users(svc) {
+    const by = flag("group");
+    if (by !== undefined) {
+      if (!isUserGroupBy(by)) throw new Error(`--group takes ${USER_GROUP_BY.join(", ")}`);
+      const g = await userGroups(svc, { ...userFilterFlags(), by, limit: flag("limit") ? Number(flag("limit")) : 20 });
+      if (args.includes("--json")) return void console.log(JSON.stringify(g, null, 2));
+      if (!g.groups.length) return void console.log("No accounts match.");
+      for (const s of g.groups) {
+        console.log(`
+${s.label} · ${s.total} account${s.total === 1 ? "" : "s"} · ${s.help}`);
+        table(
+          (s.items ?? []).map((u) => ({
+            email: u.email,
+            status: u.status,
+            flags: u.flags.join(",") || "-",
+            ip: u.signupIp ?? "-",
+            created: u.createdAt.slice(0, 10),
+          })),
+        );
+        if (s.nextCursor) console.log(`more: reelsaw users --in ${s.key} [same filter flags] --cursor ${s.nextCursor}`);
+      }
+      console.log(`
+${g.total} account${g.total === 1 ? "" : "s"} in ${g.groups.length} section${g.groups.length === 1 ? "" : "s"} (an account with two flags is in both)`);
+      return;
+    }
     const limit = flag("limit") ? Number(flag("limit")) : 50;
     const r = await listUsers(svc, { ...userFilterFlags(), limit, cursor: flag("cursor") });
     if (args.includes("--json")) return void console.log(JSON.stringify(r, null, 2));
@@ -503,7 +545,7 @@ const commands: Record<string, (svc: Services) => Promise<void>> = {
    * a command typed by name is its own confirmation, so it walks every page.
    */
   async ["users-bulk"](svc) {
-    const usage = `usage: reelsaw users-bulk <${BULK_USER_ACTIONS.join("|")}> (<email…> | --all | [--q text] [--status ${USER_STATUSES.join("|")}] [--verified yes|no] [--flagged yes] [--flag reason] [--held rule]) [--reason text] [--json]`;
+    const usage = `usage: reelsaw users-bulk <${BULK_USER_ACTIONS.join("|")}> (<email…> | --all | [--q text] [--status ${USER_STATUSES.join("|")}] [--verified yes|no] [--flagged yes] [--flag reason] [--held rule] [--in section]) [--reason text] [--json]`;
     const action = BULK_USER_ACTIONS.find((a) => a === pos[0]);
     if (!action) throw new Error(usage);
     const emails = pos.slice(1);
