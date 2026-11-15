@@ -55,6 +55,12 @@ import { takeTxLock, txLock } from "../locks.js";
 export const PROBE_CLIP = bundledAssetPath("probe/word-timestamps.mp3");
 /** How long a verdict stands before the clip is sent again (providers change what they return). */
 export const PROBE_TTL_MS = 30 * 24 * 3600_000;
+/**
+ * Which way of reading answers made a verdict. Bump it when that changes: verdicts from an older reader are
+ * stale, so a model it misjudged is tested again at the next boot instead of staying refused for PROBE_TTL_MS.
+ * 2: `openai:` with OPENAI_BASE_URL reads words before segments (ai/compat-transcription.ts).
+ */
+export const PROBE_READER = 2;
 const PROBE_TIMEOUT_MS = 5 * 60_000; // a self-hosted server may load the model into memory first
 
 export interface WordTimestampVerdict {
@@ -64,6 +70,8 @@ export interface WordTimestampVerdict {
   /** what it heard (short; shown in errors so an admin can tell a bad clip from a bad model) */
   text: string;
   checkedAt: string;
+  /** PROBE_READER when it was made; absent = 1 */
+  reader?: number;
 }
 
 /** Where verdicts live. Keys come from `verdictKey`. */
@@ -83,7 +91,7 @@ export function verdictKey(modelId: string, redactedBaseUrl?: string): string {
 
 export function isStale(v: WordTimestampVerdict, now = Date.now()): boolean {
   const at = Date.parse(v.checkedAt);
-  return !Number.isFinite(at) || now - at > PROBE_TTL_MS;
+  return !Number.isFinite(at) || now - at > PROBE_TTL_MS || (v.reader ?? 1) < PROBE_READER;
 }
 
 /** Evals, tests, the CLI before the database is attached: verdicts last for the process. */
@@ -156,7 +164,13 @@ function parseVerdict(v: unknown): WordTimestampVerdict | undefined {
   if (!v || typeof v !== "object") return undefined;
   const o = v as Record<string, unknown>;
   if (typeof o.wordLevel !== "boolean" || typeof o.checkedAt !== "string") return undefined;
-  return { wordLevel: o.wordLevel, segments: Number(o.segments) || 0, text: String(o.text ?? ""), checkedAt: o.checkedAt };
+  return {
+    wordLevel: o.wordLevel,
+    segments: Number(o.segments) || 0,
+    text: String(o.text ?? ""),
+    checkedAt: o.checkedAt,
+    ...(typeof o.reader === "number" ? { reader: o.reader } : {}),
+  };
 }
 
 /**
@@ -179,5 +193,11 @@ export async function probeWordTimestamps(
   const text = res.text.trim();
   if (!text) throw new Error("it returned no text for a 5-second test clip of clear speech, so its word timestamps could not be checked");
   const segments = res.segments.map((s) => ({ text: s.text, startSecond: s.startSecond, endSecond: s.endSecond }));
-  return { wordLevel: looksWordLevel(segments), segments: segments.length, text: text.slice(0, 120), checkedAt: new Date().toISOString() };
+  return {
+    wordLevel: looksWordLevel(segments),
+    segments: segments.length,
+    text: text.slice(0, 120),
+    checkedAt: new Date().toISOString(),
+    reader: PROBE_READER,
+  };
 }

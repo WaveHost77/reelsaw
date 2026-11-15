@@ -9,7 +9,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { createAi } from "../src/ai/registry.js";
 import { createModelCatalog, looksLikeSpeechModel } from "../src/ai/catalog.js";
-import { PROBE_TTL_MS, isStale, memoryVerdictStore, verdictKey, type VerdictStore } from "../src/ai/word-timestamps.js";
+import { PROBE_READER, PROBE_TTL_MS, isStale, memoryVerdictStore, verdictKey, type VerdictStore } from "../src/ai/word-timestamps.js";
 import { compatTranscriptionModel, segmentsOf } from "../src/ai/compat-transcription.js";
 import type { ProviderGate } from "../src/ai/gate.js";
 import { transcribe } from "ai";
@@ -165,7 +165,20 @@ describe("word-timestamp test transcription", () => {
     assert.equal(verdictKey("openai:x", "http://speaches:8000/v1"), "openai:x @ http://speaches:8000/v1");
     const checkedAt = new Date(Date.now() - PROBE_TTL_MS - 1000).toISOString();
     assert.equal(isStale({ wordLevel: true, segments: 13, text: "", checkedAt }), true);
-    assert.equal(isStale({ wordLevel: true, segments: 13, text: "", checkedAt: new Date().toISOString() }), false);
+    assert.equal(isStale({ wordLevel: true, segments: 13, text: "", checkedAt: new Date().toISOString(), reader: PROBE_READER }), false);
+    // made by an older way of reading answers: tested again, whatever its age
+    assert.equal(isStale({ wordLevel: false, segments: 1, text: "", checkedAt: new Date().toISOString() }), true);
+  });
+
+  it("reads words before segments from openai: on OPENAI_BASE_URL (Speaches answers with both)", async () => {
+    const cfg = { ...config(), TRANSCRIPTION_MODEL: "openai:openai/whisper-large-v3-turbo", OPENAI_BASE_URL: base, OPENAI_API_KEY: "sk-test" } as Config;
+    const ai = createAi(cfg, log);
+    await ai.verify("transcription", "openai:openai/whisper-large-v3-turbo");
+    assert.equal(calls.length, 1);
+    assert.match(calls[0]!.body, /name="timestamp_granularities\[\]"\r\n\r\nword/);
+    const v = await ai.wordTimestampVerdict("openai:openai/whisper-large-v3-turbo");
+    assert.equal(v?.wordLevel, true);
+    assert.equal(v?.segments, WORDS.length);
   });
 
   it("uses a verdict from the shared store without calling", async () => {
@@ -175,6 +188,7 @@ describe("word-timestamp test transcription", () => {
       segments: 13,
       text: "from another process",
       checkedAt: new Date().toISOString(),
+      reader: PROBE_READER,
     });
     const ai = createAi(config(), log, null, undefined, undefined, null, store);
     await ai.verify("transcription", "openrouter:openai/gpt-4o-transcribe");
