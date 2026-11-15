@@ -147,6 +147,29 @@ describe("abuse guards", () => {
       items: Array<{ signupIp: string | null; flags: string[] }>;
     };
     assert.ok(unflagged.items.every((x) => x.flags.length === 0 && x.signupIp !== ip));
+    // grouped by address inside shared_ip: our three accounts are one section keyed by the address, and its filter lists exactly them
+    const byIp = (await trpc(admin.cookie, "admin.users.groups", { ...shared.filter, by: "ip", limit: 100 }, "GET")).data as {
+      total: number;
+      groups: Section[];
+    };
+    const mine = byIp.groups.find((s) => s.key === ip);
+    assert.ok(mine, JSON.stringify(byIp.groups.map((s) => s.key)));
+    assert.equal(mine.total, 3);
+    assert.ok(mine.items.every((x) => x.signupIp === ip && x.flags.includes("shared_ip")));
+    const addresses = byIp.groups.filter((s) => s.key !== "rest");
+    assert.ok(
+      addresses.every((s, i) => i === 0 || addresses[i - 1]!.total >= s.total),
+      "busiest address first",
+    );
+    assert.equal(
+      byIp.groups.reduce((n, s) => n + s.total, 0),
+      byIp.total,
+      "every account in exactly one address section",
+    );
+    const fromIp = (await trpc(admin.cookie, "admin.users.list", { ...mine.filter, limit: 100 }, "GET")).data as { total: number };
+    assert.equal(fromIp.total, 3);
+    const unshared = (await trpc(admin.cookie, "admin.users.list", { signupIp: ip, sharedIp: false, limit: 100 }, "GET")).data as { total: number };
+    assert.equal(unshared.total, 0, "an address three accounts share is never in rest");
     const ev = await pool.query(`select count(*)::int as n from events where type = 'user.flagged' and user_id = any($1)`, [made.slice(-3)]);
     assert.equal(ev.rows[0].n, 3);
   });

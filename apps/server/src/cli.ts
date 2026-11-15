@@ -5,6 +5,7 @@ import {
   type EmailTopic,
   FLAG_GROUPS,
   isAbuseFlag,
+  IP_GROUP_REST,
   isFlagGroup,
   isUserGroupBy,
   USER_GROUP_BY,
@@ -21,11 +22,13 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  * Commands
  *   version [--json]                        running version, latest published release, how to upgrade
  *   releases [--json] [--limit n]           published versions from GitHub (reelsaw.com/releases / list_releases)
- *   users [--q text] [--status s] [--verified yes|no] [--flagged yes] [--flag shared_ip|signup_burst|disposable_email] [--held rule] [--in shared_ip|…|none] [--limit n] [--cursor c] [--json]
+ *   users [--q text] [--status s] [--verified yes|no] [--flagged yes] [--flag shared_ip|signup_burst|disposable_email] [--held rule] [--ip address] [--shared-ip yes|no] [--in shared_ip|…|none] [--limit n] [--cursor c] [--json]
  *                                           list accounts a page at a time: role, status, email verified, sign-up date
- *   users --group flag [filter flags] [--limit n] [--json]
- *                                           the same list in sections, one per abuse flag then the unflagged, each with
- *                                           its count (Users page "Group by flag", list_users groupBy); --in <key> takes one section
+ *   users --group flag|ip [filter flags] [--limit n] [--json]
+ *                                           the same list in sections, each with its count (Users page "Group",
+ *                                           list_users groupBy): flag = one per abuse flag then the unflagged, --in <key>
+ *                                           takes one; ip = one per sign-up address shared by several accounts, busiest
+ *                                           first, then the rest (--ip <address> or --shared-ip no takes one)
  *   users-bulk <approve|hold|suspend|reinstate|delete> (<email…> | --all | filter flags) [--reason text]
  *                                           act on many accounts (same as the Users selection bar and manage_users);
  *                                           hold sends active ones back to approval; filter flags as for `users`
@@ -326,6 +329,10 @@ function userFilterFlags(): UserFilter {
   }
   const held = flag("held");
   if (held) f.heldBy = held;
+  const ip = flag("ip");
+  if (ip) f.signupIp = ip;
+  const shared = yesNo("shared-ip");
+  if (shared !== undefined) f.sharedIp = shared;
   const section = flag("in");
   if (section !== undefined) {
     if (!isFlagGroup(section)) throw new Error(`--in takes a section of --group flag: ${FLAG_GROUPS.join(", ")}`);
@@ -518,10 +525,11 @@ ${s.label} · ${s.total} account${s.total === 1 ? "" : "s"} · ${s.help}`);
             created: u.createdAt.slice(0, 10),
           })),
         );
-        if (s.nextCursor) console.log(`more: reelsaw users --in ${s.key} [same filter flags] --cursor ${s.nextCursor}`);
+        const take = g.by === "ip" ? (s.key === IP_GROUP_REST ? "--shared-ip no" : `--ip ${s.key}`) : `--in ${s.key}`;
+        if (s.nextCursor) console.log(`more: reelsaw users ${take} [same filter flags] --cursor ${s.nextCursor}`);
       }
       console.log(`
-${g.total} account${g.total === 1 ? "" : "s"} in ${g.groups.length} section${g.groups.length === 1 ? "" : "s"} (an account with two flags is in both)`);
+${g.total} account${g.total === 1 ? "" : "s"} in ${g.groups.length} section${g.groups.length === 1 ? "" : "s"}${g.by === "flag" ? " (an account with two flags is in both)" : ""}${g.moreSections ? `; ${g.moreSections} more shared address${g.moreSections === 1 ? "" : "es"} not shown, narrow the filter` : ""}`);
       return;
     }
     const limit = flag("limit") ? Number(flag("limit")) : 50;
@@ -545,7 +553,7 @@ ${g.total} account${g.total === 1 ? "" : "s"} in ${g.groups.length} section${g.g
    * a command typed by name is its own confirmation, so it walks every page.
    */
   async ["users-bulk"](svc) {
-    const usage = `usage: reelsaw users-bulk <${BULK_USER_ACTIONS.join("|")}> (<email…> | --all | [--q text] [--status ${USER_STATUSES.join("|")}] [--verified yes|no] [--flagged yes] [--flag reason] [--held rule] [--in section]) [--reason text] [--json]`;
+    const usage = `usage: reelsaw users-bulk <${BULK_USER_ACTIONS.join("|")}> (<email…> | --all | [--q text] [--status ${USER_STATUSES.join("|")}] [--verified yes|no] [--flagged yes] [--flag reason] [--held rule] [--ip address] [--shared-ip yes|no] [--in section]) [--reason text] [--json]`;
     const action = BULK_USER_ACTIONS.find((a) => a === pos[0]);
     if (!action) throw new Error(usage);
     const emails = pos.slice(1);

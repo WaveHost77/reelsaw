@@ -4,7 +4,7 @@
  * stdio bridge) can import it without the services behind it.
  */
 import { z } from "zod";
-import { ABUSE_FLAGS, FLAG_GROUPS, USER_GROUP_BY } from "@reelsaw/shared";
+import { ABUSE_FLAGS, FLAG_GROUPS, MAX_IP_GROUPS, USER_GROUP_BY } from "@reelsaw/shared";
 
 export const USER_STATUSES = ["pending", "active", "suspended"] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
@@ -28,9 +28,18 @@ export const userFilterSchema = z.object({
     .describe(
       'Only accounts a sign-up rule held for approval, by the rule as list_signup_rules shows it (kind and pattern: "ip 203.0.113.0/24"), whatever their status now',
     ),
+  signupIp: z.string().min(1).max(64).optional().describe("Only accounts that signed up from exactly this address (203.0.113.7)"),
+  sharedIp: z
+    .boolean()
+    .optional()
+    .describe(
+      "true = another account signed up from the same address; false = the only account from its address, or no address recorded (the rest section of groupBy ip)",
+    ),
   group: z
     .object({
-      by: z.enum(USER_GROUP_BY).describe("flag: the sections of list_users groupBy flag"),
+      by: z
+        .literal("flag")
+        .describe("flag: the sections of list_users groupBy flag (an address section of groupBy ip filters with signupIp or sharedIp instead)"),
       key: z.enum(FLAG_GROUPS).describe("The section: an abuse flag, or none for the accounts with no flag"),
     })
     .optional()
@@ -50,7 +59,11 @@ export const userListInput = userFilterSchema.extend({
  * pages or acts on it. `limit` 0 = counts only (the Users page loads each open section itself).
  */
 export const userGroupsInput = userFilterSchema.extend({
-  by: z.enum(USER_GROUP_BY).describe("flag = one section per abuse reason (shared_ip, signup_burst, disposable_email), then none (not flagged)"),
+  by: z
+    .enum(USER_GROUP_BY)
+    .describe(
+      `flag = one section per abuse reason (shared_ip, signup_burst, disposable_email), then none (not flagged); ip = one section per sign-up address more than one account shares, most accounts first (up to ${MAX_IP_GROUPS}), then rest`,
+    ),
   limit: z.number().int().min(0).max(100).default(20).describe("Accounts listed per section (0-100, default 20; 0 = counts only)"),
 });
 
@@ -60,7 +73,7 @@ export const userListToolInput = userListInput.extend({
     .enum(USER_GROUP_BY)
     .optional()
     .describe(
-      "Split the matching accounts into sections instead of one page: flag = one per abuse reason, then none (not flagged); an account with two flags is in both. Returns { by, total, groups: [{ key, label, help, total, filter, items, nextCursor }] }: limit accounts per section; pass a section's filter fields to list_users with its nextCursor for more, or its filter to manage_users to act on that section",
+      `Split the matching accounts into sections instead of one page: flag = one per abuse reason, then none (not flagged), and an account with two flags is in both; ip = one per sign-up address shared by more than one account (key = the address, most accounts first, up to ${MAX_IP_GROUPS}; moreSections says how many were left out), then rest. Combine ip with flag shared_ip to see which accounts share which address. Returns { by, total, moreSections, groups: [{ key, label, help, total, filter, items, nextCursor }] }: limit accounts per section; pass a section's filter fields to list_users with its nextCursor for more, or its filter to manage_users to act on that section`,
     ),
 });
 

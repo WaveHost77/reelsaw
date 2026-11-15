@@ -340,7 +340,11 @@ The Users page lists accounts a page at a time, pending first, with whether each
 verified; search and the status, verification and flag filters (any flag, or one reason such as shared ip; a
 flag chip lists everyone flagged for that reason) run in the database and stay in the link. "Group by flag"
 splits the same list into sections, one per reason and then the unflagged (folded), each with its own count,
-paging and "Select all" over just that section; an account flagged twice is in both. Check rows (or "Select all" to take every match, not only the loaded page) to approve,
+paging and "Select all" over just that section; an account flagged twice is in both. Inside shared ip and
+signup burst the accounts are split again by sign-up address, busiest first, so you see which accounts came from
+which address and can select or suspend one address's accounts at once. "Group by address" does the same for the
+whole list: one section per address that more than one account signed up from, then the rest (folded); "Only this
+address" narrows the page to one. Check rows (or "Select all" to take every match, not only the loaded page) to approve,
 require approval again, suspend, reinstate or delete them together; each account goes through the same checks as one at a
 time (never yourself, never the last admin) and anything refused is listed with the reason. The same
 list and actions are `list_users` / `manage_users` over MCP and `reelsaw users` / `reelsaw users-bulk`
@@ -661,8 +665,8 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | --- | --- |
 | `reelsaw version [--json]` | running version, latest published release, how to upgrade |
 | `reelsaw releases [--json] [--limit n]` | published versions from GitHub (reelsaw.com/releases / list_releases) |
-| `reelsaw users [--q text] [--status s] [--verified yes\|no] [--flagged yes] [--flag shared_ip\|signup_burst\|disposable_email] [--held rule] [--in shared_ip\|…\|none] [--limit n] [--cursor c] [--json]` | list accounts a page at a time: role, status, email verified, sign-up date |
-| `reelsaw users --group flag [filter flags] [--limit n] [--json]` | the same list in sections, one per abuse flag then the unflagged, each with its count (Users page "Group by flag", list_users groupBy); --in <key> takes one section |
+| `reelsaw users [--q text] [--status s] [--verified yes\|no] [--flagged yes] [--flag shared_ip\|signup_burst\|disposable_email] [--held rule] [--ip address] [--shared-ip yes\|no] [--in shared_ip\|…\|none] [--limit n] [--cursor c] [--json]` | list accounts a page at a time: role, status, email verified, sign-up date |
+| `reelsaw users --group flag\|ip [filter flags] [--limit n] [--json]` | the same list in sections, each with its count (Users page "Group", list_users groupBy): flag = one per abuse flag then the unflagged, --in <key> takes one; ip = one per sign-up address shared by several accounts, busiest first, then the rest (--ip <address> or --shared-ip no takes one) |
 | `reelsaw users-bulk <approve\|hold\|suspend\|reinstate\|delete> (<email…> \| --all \| filter flags) [--reason text]` | act on many accounts (same as the Users selection bar and manage_users); hold sends active ones back to approval; filter flags as for `users` (--held "ip 203.0.113.0/24": accounts that sign-up rule held); delete is forever |
 | `reelsaw approve <email>` | approve a waiting account (when email is off or the admin is locked out) |
 | `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |
