@@ -1,5 +1,15 @@
 # @reelsaw/server
 
+## 0.37.0
+
+### Minor Changes
+
+- [#274](https://github.com/osbytes/reelsaw/pull/274) [`7be0341`](https://github.com/osbytes/reelsaw/commit/7be0341ac2521140b3df25b75557f6f41602d04f) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Admins can filter the Users page by why an account was flagged: shared sign-up address, sign-up burst or temporary email domain. The new Flag filter shows how many accounts each reason covers, a flag chip on a row lists everyone flagged for that reason, and the choice stays in the link. Bulk actions on "every match" follow it, and the same filter is `flag` in `list_users` / `manage_users` and `--flag` in `reelsaw users` / `users-bulk`.
+
+### Patch Changes
+
+- [#273](https://github.com/osbytes/reelsaw/pull/273) [`e7511af`](https://github.com/osbytes/reelsaw/commit/e7511af1ba15f29debab3ad7cd0b4b334ad2b8fb) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Self-hosted instances that transcribe with a local OpenAI-compatible speech server through `OPENAI_BASE_URL` (Speaches in the local-ai setup) boot again. The word-timestamp check read the server's phrase-level segments instead of the per-word times it returns alongside them, judged the model unusable and stopped startup. A result stored by the old check is tested again at the next boot.
+
 ## 0.36.1
 
 ### Patch Changes
