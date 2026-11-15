@@ -59,8 +59,8 @@ Run as `docker compose exec app reelsaw <command>` (from source: `pnpm --filter 
 | --- | --- |
 | `reelsaw version [--json]` | running version, latest published release, how to upgrade |
 | `reelsaw releases [--json] [--limit n]` | published versions from GitHub (reelsaw.com/releases / list_releases) |
-| `reelsaw users [--q text] [--status s] [--verified yes\|no] [--flagged yes] [--flag shared_ip\|signup_burst\|disposable_email] [--held rule] [--in section] [--limit n] [--cursor c] [--json]` | list accounts a page at a time: role, status, email verified, sign-up date |
-| `reelsaw users --group flag [filter flags] [--limit n] [--json]` | the same list in sections, one per abuse flag then the unflagged, each with its count; `--in shared_ip` (or `none`) takes one section, for `users` and `users-bulk` |
+| `reelsaw users [--q text] [--status s] [--verified yes\|no] [--flagged yes] [--flag shared_ip\|signup_burst\|disposable_email] [--held rule] [--in shared_ip\|…\|none] [--limit n] [--cursor c] [--json]` | list accounts a page at a time: role, status, email verified, sign-up date |
+| `reelsaw users --group flag [filter flags] [--limit n] [--json]` | the same list in sections, one per abuse flag then the unflagged, each with its count (Users page "Group by flag", list_users groupBy); --in <key> takes one section |
 | `reelsaw users-bulk <approve\|hold\|suspend\|reinstate\|delete> (<email…> \| --all \| filter flags) [--reason text]` | act on many accounts (same as the Users selection bar and manage_users); hold sends active ones back to approval; filter flags as for `users` (--held "ip 203.0.113.0/24": accounts that sign-up rule held); delete is forever |
 | `reelsaw approve <email>` | approve a waiting account (when email is off or the admin is locked out) |
 | `reelsaw make-admin <email>` | promote an account to admin (approves it first if needed) |
