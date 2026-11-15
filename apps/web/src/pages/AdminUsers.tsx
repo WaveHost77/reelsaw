@@ -8,12 +8,14 @@ import { ChevronRight, Users } from "lucide-react";
 import { toast } from "sonner";
 import {
   ABUSE_FLAGS,
+  ADDRESS_FLAGS,
   type AbuseFlag,
   FLAG_HELP,
   FLAG_LABEL,
   type FlagGroup,
   formatBytes,
   inFlagGroup,
+  IP_GROUP_REST,
   isAbuseFlag,
   isUserGroupBy,
   type UserGroupBy,
@@ -78,14 +80,16 @@ const readFlag = (h: URLSearchParams): FlagFilter => {
   return isAbuseFlag(f) ? f : h.get("flagged") === "1" ? "any" : "";
 };
 const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-/** "Group": one section per abuse reason (then the unflagged), or one flat list. In the hash as group=flag. */
+/**
+ * "Group": one section per abuse reason (then the unflagged), with the address flags split by sign-up address; one
+ * section per shared sign-up address (then the rest); or one flat list. In the hash as group=flag or group=ip.
+ */
 const GROUP_OPTIONS = [
   { value: "", label: "No grouping" },
   { value: "flag", label: "Group by flag" },
+  { value: "ip", label: "Group by address" },
 ];
 const asGroup = (v: string | null): UserGroupBy | "" => (isUserGroupBy(v) ? v : "");
-/** What "every match" means for the selection bar: the whole filtered list, or one section of it. */
-type AllOf = { key: FlagGroup | null };
 type UserFilterInput = {
   q?: string | undefined;
   flagged?: boolean | undefined;
@@ -93,8 +97,27 @@ type UserFilterInput = {
   status?: Status | undefined;
   verified?: boolean | undefined;
   heldBy?: string | undefined;
-  group?: { by: UserGroupBy; key: FlagGroup } | undefined;
+  signupIp?: string | undefined;
+  sharedIp?: boolean | undefined;
+  group?: { by: "flag"; key: FlagGroup } | undefined;
 };
+/** A section of the grouped list as the server returns it: its key, words, count over the filter, and the filter that is exactly it. */
+type SectionData = { key: string; label: string; help: string; total: number; filter: UserFilterInput };
+/**
+ * What "every match" means for the selection bar: the whole filtered list (`id` null), or one section of it (a
+ * flag, an address, or an address inside a flag). `covers` says which loaded rows that is, so they show checked.
+ */
+type AllOf = { id: string | null; filter: UserFilterInput; label: string; total: number; covers: (r: Row) => boolean };
+const isFlagKey = (k: string): k is FlagGroup => k === "none" || isAbuseFlag(k);
+/** Which loaded rows a section holds: the same rule as its server filter, for the rows the page has. */
+function sectionCovers(by: UserGroupBy, key: string, siblings: readonly SectionData[]): (r: Row) => boolean {
+  if (by === "flag") return (r) => isFlagKey(key) && inFlagGroup(r.flags, key);
+  if (key !== IP_GROUP_REST) return (r) => r.signupIp === key;
+  const shared = new Set(siblings.map((g) => g.key));
+  return (r) => !r.signupIp || !shared.has(r.signupIp);
+}
+/** A flag section the page splits by sign-up address: several accounts from one address is what the flag means. */
+const byAddress = (k: string) => ADDRESS_FLAGS.some((f) => f === k);
 type SortKey = "name" | "status" | "projects" | "sourceMinutes" | "clipsRendered" | "storedBytes" | "lastActive";
 
 const STATUS: Record<Status, { glyph: string; tone: string; word: string }> = {
@@ -159,6 +182,8 @@ export function AdminUsersPage() {
   const [verified, setVerified] = useState<"yes" | "no" | "">(() => asYesNo(readHash().get("verified")));
   /** only the accounts one sign-up rule held ("ip 203.0.113.0/24"), from the rule's link in Settings */
   const [heldBy, setHeldBy] = useState(() => readHash().get("held") ?? "");
+  /** only the accounts from one sign-up address, from an address section's "Only this address" */
+  const [signupIp, setSignupIp] = useState(() => readHash().get("ip") ?? "");
   const [ruleFor, setRuleFor] = useState<Row | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
   const [confirm, setConfirm] = useState<{ kind: "ban" | "delete" | "role" | "hold"; row: Row } | null>(null);
@@ -170,8 +195,20 @@ export function AdminUsersPage() {
   const [allOf, setAllOf] = useState<AllOf | null>(null);
   const allMatching = allOf !== null;
   const [groupBy, setGroupBy] = useState<UserGroupBy | "">(() => asGroup(readHash().get("group")));
-  /** collapsed sections; the unflagged start folded, since grouping by flag is for looking at the flagged */
-  const [closed, setClosed] = useState<ReadonlySet<FlagGroup>>(() => new Set(["none"]));
+  /**
+   * folded sections, by section id ("flag:none", "ip:rest", "flag:shared_ip/ip:203.0.113.7"); the unflagged and the
+   * unshared start folded, since grouping is for looking at the flagged and the shared
+   */
+  const [closed, setClosed] = useState<ReadonlySet<string>>(() => new Set(["flag:none", "ip:rest"]));
+  const toggleSection = useCallback(
+    (id: string) =>
+      setClosed((cur) => {
+        const next = new Set(cur);
+        if (!next.delete(id)) next.add(id);
+        return next;
+      }),
+    [],
+  );
   /** how far a bulk run has got; local because one run is several calls */
   const [progress, setProgress] = useState<{ done: number; of: number } | null>(null);
   // a pasted link, back/forward or a hash edit re-applies the filters (our own writes do not notify the router)
@@ -184,6 +221,7 @@ export function AdminUsersPage() {
     setStatus(asStatus(h.get("status")));
     setVerified(asYesNo(h.get("verified")));
     setHeldBy(h.get("held") ?? "");
+    setSignupIp(h.get("ip") ?? "");
     setGroupBy(asGroup(h.get("group")));
   }, [hashKey]);
   const q = useDebounced(search.trim(), 200);
@@ -195,8 +233,9 @@ export function AdminUsersPage() {
       status: status || undefined,
       verified: verified ? verified === "yes" : undefined,
       heldBy: heldBy || undefined,
+      signupIp: signupIp || undefined,
     }),
-    [q, flag, status, verified, heldBy],
+    [q, flag, status, verified, heldBy, signupIp],
   );
   useEffect(() => {
     writeHash({
@@ -206,12 +245,13 @@ export function AdminUsersPage() {
       status: status || null,
       verified: verified || null,
       held: heldBy || null,
+      ip: signupIp || null,
       group: groupBy || null,
     });
     // a selection made under other filters is not what the new list shows
     setSel([]);
     setAllOf(null);
-  }, [q, flag, status, verified, heldBy, groupBy]);
+  }, [q, flag, status, verified, heldBy, signupIp, groupBy]);
   // server-side paging; each account carries its all-time usage, so there is no separate usage query
   const list = useInfiniteQuery(
     trpc.admin.users.list.infiniteQueryOptions(
@@ -223,10 +263,10 @@ export function AdminUsersPage() {
   const groups = useQuery(
     trpc.admin.users.groups.queryOptions({ ...filter, by: groupBy || "flag", limit: 0 }, { enabled: !!groupBy, placeholderData: keepPreviousData }),
   );
-  const sections = groupBy ? (groups.data?.groups ?? []) : [];
-  /** the rows each mounted section has loaded, so selection and bulk targets see every one of them */
-  const [groupRows, setGroupRows] = useState<Partial<Record<FlagGroup, Row[]>>>({});
-  const onGroupRows = useCallback((key: FlagGroup, r: Row[] | null) => {
+  const sections: SectionData[] = groupBy ? (groups.data?.groups ?? []) : [];
+  /** the rows each mounted section has loaded (by section id), so selection and bulk targets see every one of them */
+  const [groupRows, setGroupRows] = useState<Partial<Record<string, Row[]>>>({});
+  const onGroupRows = useCallback((key: string, r: Row[] | null) => {
     setGroupRows((cur) => {
       if (cur[key] === r || (!r && !(key in cur))) return cur;
       const next = { ...cur };
@@ -268,9 +308,9 @@ export function AdminUsersPage() {
   }, [groupBy, list.data, groupRows]);
   const total = groupBy ? (groups.data?.total ?? 0) : (list.data?.pages[0]?.total ?? 0);
   /** the filter "every match" acts on: the whole list, or the one section picked */
-  const allFilter = (a: AllOf): UserFilterInput => (a.key && groupBy ? { ...filter, group: { by: groupBy, key: a.key } } : filter);
-  const allTotal = allOf?.key ? (sections.find((g) => g.key === allOf.key)?.total ?? 0) : total;
-  const allLabel = allOf?.key ? `every account in “${sections.find((g) => g.key === allOf.key)?.label ?? allOf.key}”` : "every matching account";
+  const allFilter = (a: AllOf): UserFilterInput => (a.id ? a.filter : filter);
+  const allTotal = allOf?.id ? allOf.total : total;
+  const allLabel = allOf?.id ? `every account in “${allOf.label}”` : "every matching account";
   /** One action over the selection: chunks of checked ids, or every page of the filter until the server says it is done. */
   const bulk = useMutation({
     mutationFn: async ({
@@ -359,7 +399,7 @@ export function AdminUsersPage() {
     setSel((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   };
   /** checked: picked by hand, or inside what "every match" covers (the whole list, or that section) */
-  const isChecked = (r: Row) => (allOf ? !allOf.key || inFlagGroup(r.flags, allOf.key) : sel.includes(r.id));
+  const isChecked = (r: Row) => (allOf ? allOf.covers(r) : sel.includes(r.id));
   /** a section header's checkbox: its loaded rows on or off together */
   const setMany = (ids: string[], on: boolean) => {
     setAllOf(null);
@@ -593,9 +633,9 @@ export function AdminUsersPage() {
           <input
             type="checkbox"
             className="h-4 w-4 accent-[var(--acc)]"
-            checked={allOn || (allOf !== null && !allOf.key)}
+            checked={allOn || (allOf !== null && !allOf.id)}
             ref={(el) => {
-              if (el) el.indeterminate = (someOn && !allMatching) || !!allOf?.key;
+              if (el) el.indeterminate = (someOn && !allMatching) || !!allOf?.id;
             }}
             disabled={!allIds.length || bulk.isPending}
             onChange={() => {
@@ -617,7 +657,25 @@ export function AdminUsersPage() {
     { label: "Active", width: "min-[1040px]:w-[6.5rem]", full: true, sort: sortable("lastActive") },
     { label: null, srLabel: "Actions", width: "w-14 min-[1040px]:w-[14rem]" },
   ];
-  const filtered = !!(flag || status || verified || heldBy);
+  const filtered = !!(flag || status || verified || heldBy || signupIp);
+  const colCount = { folded: columns.filter((c) => !c.full).length, full: columns.length };
+  /** what every section, at any depth, takes from the page */
+  const sectionProps: SectionShared = {
+    closed,
+    onToggle: toggleSection,
+    onRows: onGroupRows,
+    sortRows,
+    renderRow,
+    skeletonRow,
+    colCount,
+    pageSize: q ? 100 : PAGE,
+    isChecked,
+    allOfId: allOf ? allOf.id : undefined,
+    onSetMany: setMany,
+    onSelectAll: setAllOf,
+    onlyAddress: setSignupIp,
+    disabled: bulk.isPending,
+  };
   const listError = groupBy ? groups.error : list.error;
   const pendingList = groupBy ? groups.isPending : list.isPending;
   const empty = groupBy ? !!groups.data && !groups.isPlaceholderData && sections.length === 0 : !!list.data && !list.isPlaceholderData && rows.length === 0;
@@ -641,8 +699,21 @@ export function AdminUsersPage() {
               <span className="sr-only">Clear this filter</span>
             </button>
           )}
+          {/* arrives with an address section's "Only this address"; clearing it shows everyone again */}
+          {signupIp && (
+            <button
+              type="button"
+              className="btn-ghost h-[38px] max-w-[16rem] gap-1.5 bg-sunk text-xs font-semibold"
+              onClick={() => setSignupIp("")}
+              title={`Only accounts that signed up from ${signupIp}. Click to show everyone.`}
+            >
+              <span className="truncate">From {signupIp}</span>
+              <span aria-hidden>✕</span>
+              <span className="sr-only">Clear this filter</span>
+            </button>
+          )}
           <Select
-            className="h-[38px] w-[9.5rem]"
+            className="h-[38px] w-[10.5rem]"
             ariaLabel="Group accounts"
             value={groupBy}
             onValueChange={(v) => setGroupBy(asGroup(v))}
@@ -682,7 +753,13 @@ export function AdminUsersPage() {
       {((groupBy ? sections.length > 0 : rows.length > 0) || (pendingList && !listError)) && (
         <section className="flex flex-col gap-2">
           <ListTable
-            caption={groupBy ? "Accounts grouped by abuse flag, with all-time usage" : "Accounts, with all-time usage"}
+            caption={
+              groupBy === "ip"
+                ? "Accounts grouped by sign-up address, with all-time usage"
+                : groupBy
+                  ? "Accounts grouped by abuse flag, shared addresses split by address, with all-time usage"
+                  : "Accounts, with all-time usage"
+            }
             columns={columns}
             loading={pendingList}
             loadingLabel="Loading accounts…"
@@ -691,33 +768,20 @@ export function AdminUsersPage() {
               groups.isPending ? (
                 Array.from({ length: LIST_SKELETON_ROWS }, (_, i) => skeletonRow(i))
               ) : (
-                sections.map((g) => (
-                  <UserGroupSection
-                    key={g.key}
-                    section={g}
-                    filter={{ ...filter, group: { by: groupBy, key: g.key } }}
-                    open={!closed.has(g.key)}
-                    onToggle={() =>
-                      setClosed((cur) => {
-                        const next = new Set(cur);
-                        if (!next.delete(g.key)) next.add(g.key);
-                        return next;
-                      })
-                    }
-                    onRows={onGroupRows}
-                    sortRows={sortRows}
-                    renderRow={renderRow}
-                    skeletonRow={skeletonRow}
-                    colCount={{ folded: columns.filter((c) => !c.full).length, full: columns.length }}
-                    pageSize={q ? 100 : PAGE}
-                    isChecked={isChecked}
-                    allOfHere={allOf?.key === g.key}
-                    allOfOther={allOf !== null && allOf.key !== g.key}
-                    onSetMany={setMany}
-                    onSelectAll={() => setAllOf({ key: g.key })}
-                    disabled={bulk.isPending}
-                  />
-                ))
+                <>
+                  {sections.map((g) => (
+                    <UserGroupSection
+                      key={g.key}
+                      id={`${groupBy}:${g.key}`}
+                      section={g}
+                      address={groupBy === "ip" && g.key !== IP_GROUP_REST}
+                      covers={sectionCovers(groupBy, g.key, sections)}
+                      split={groupBy === "flag" && byAddress(g.key)}
+                      shared={sectionProps}
+                    />
+                  ))}
+                  {!!groups.data?.moreSections && <MoreAddresses n={groups.data.moreSections} cols={colCount} />}
+                </>
               )
             ) : (
               <>
@@ -739,7 +803,7 @@ export function AdminUsersPage() {
             {pendingList ? (
               <Skeleton className="h-3 w-40" />
             ) : groupBy ? (
-              `${accounts(total)} in ${num.format(sections.length)} section${sections.length === 1 ? "" : "s"}${sections.length > 1 ? " · an account with two flags is in both" : ""}`
+              `${accounts(total)} in ${num.format(sections.length)} section${sections.length === 1 ? "" : "s"}${groupBy === "flag" && sections.length > 1 ? " · an account with two flags is in both" : ""}`
             ) : (
               `${q && total > rows.length ? "Showing the best " : "Showing "}${num.format(rows.length)} of ${accounts(total)}`
             )}
@@ -761,7 +825,11 @@ export function AdminUsersPage() {
                 allOn &&
                 !allMatching &&
                 total > rows.length && (
-                  <button type="button" className="btn-ghost h-8 px-2 text-xs" onClick={() => setAllOf({ key: null })}>
+                  <button
+                    type="button"
+                    className="btn-ghost h-8 px-2 text-xs"
+                    onClick={() => setAllOf({ id: null, filter, label: "every matching account", total, covers: () => true })}
+                  >
                     Select all {num.format(total)}
                   </button>
                 )
@@ -953,35 +1021,12 @@ export function AdminUsersPage() {
   );
 }
 
-/**
- * One section of the grouped list (group by flag): a header row with the reason, how many accounts it holds over
- * the whole filter, a fold toggle and a checkbox for its rows, then its rows, paged on their own with the section's
- * filter (the server's `group`), so "Load more" and "Select all 120" mean this section only. A folded section
- * loads nothing until opened. Rows render through the page's `renderRow`, so a grouped row is the flat row.
- */
-function UserGroupSection({
-  section,
-  filter,
-  open,
-  onToggle,
-  onRows,
-  sortRows,
-  renderRow,
-  skeletonRow,
-  colCount,
-  pageSize,
-  isChecked,
-  allOfHere,
-  allOfOther,
-  onSetMany,
-  onSelectAll,
-  disabled,
-}: {
-  section: { key: FlagGroup; label: string; help: string; total: number };
-  filter: UserFilterInput;
-  open: boolean;
-  onToggle: () => void;
-  onRows: (key: FlagGroup, rows: Row[] | null) => void;
+/** What every section of the grouped list takes from the page, at any depth. */
+type SectionShared = {
+  /** folded section ids */
+  closed: ReadonlySet<string>;
+  onToggle: (id: string) => void;
+  onRows: (id: string, rows: Row[] | null) => void;
   sortRows: (rows: Row[]) => Row[];
   renderRow: (r: Row, key: string) => ReactNode;
   skeletonRow: (i: number, key?: string | number) => ReactNode;
@@ -989,31 +1034,76 @@ function UserGroupSection({
   colCount: { folded: number; full: number };
   pageSize: number;
   isChecked: (r: Row) => boolean;
-  /** "every match" is this whole section */
-  allOfHere: boolean;
-  /** "every match" is the whole list or another section: the header box reads its rows, a click starts over */
-  allOfOther: boolean;
+  /** what "every match" is: undefined = nothing picked that way, null = the whole list, else a section id */
+  allOfId: string | null | undefined;
   onSetMany: (ids: string[], on: boolean) => void;
-  onSelectAll: () => void;
+  onSelectAll: (a: AllOf) => void;
+  /** narrow the page to one sign-up address (the "ip" filter) */
+  onlyAddress: (ip: string) => void;
   disabled: boolean;
+};
+
+/**
+ * One section of the grouped list: a header row with what it is (a flag, or a sign-up address), how many accounts
+ * it holds over the whole filter, a fold toggle and a checkbox, then its rows, paged on their own with the
+ * section's filter from the server, so "Load more" and "Select all 120" mean this section only. A folded section
+ * loads nothing until opened. Rows render through the page's `renderRow`, so a grouped row is the flat row.
+ *
+ * `split` (group by flag, shared ip and signup burst): instead of one list, the section holds one sub-section per
+ * sign-up address, so the accounts behind each address read together. Its checkbox then selects the whole section.
+ */
+function UserGroupSection({
+  id,
+  section,
+  covers,
+  split = false,
+  address = false,
+  depth = 0,
+  selectLabel,
+  shared,
+}: {
+  /** unique among every section on the page, at any depth ("flag:shared_ip", "flag:shared_ip/ip:203.0.113.7") */
+  id: string;
+  section: SectionData;
+  /** which loaded rows this section holds, for "Select all" */
+  covers: (r: Row) => boolean;
+  split?: boolean;
+  /** the key is a sign-up address: shown as one, with "Only this address" */
+  address?: boolean;
+  depth?: 0 | 1;
+  /** what the selection bar calls this section when it is all selected (default: its label) */
+  selectLabel?: string;
+  shared: SectionShared;
 }) {
+  const { closed, onToggle, onRows, sortRows, renderRow, skeletonRow, colCount, pageSize, isChecked, allOfId, onSetMany, onSelectAll, onlyAddress, disabled } =
+    shared;
   const trpc = useTRPC();
+  const open = !closed.has(id);
   const list = useInfiniteQuery(
     trpc.admin.users.list.infiniteQueryOptions(
-      { ...filter, limit: PAGE },
-      { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData, enabled: open },
+      { ...section.filter, limit: PAGE },
+      { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData, enabled: open && !split },
     ),
   );
   const loaded = useMemo(() => (list.data?.pages.flatMap((pg) => pg.items) ?? []) as Row[], [list.data]);
   const { key, label, help, total } = section;
-  useEffect(() => onRows(key, loaded), [key, loaded, onRows]);
-  useEffect(() => () => onRows(key, null), [key, onRows]);
+  // a split section's rows are its address sections' rows, reported by them
+  useEffect(() => {
+    if (!split) onRows(id, loaded);
+  }, [id, split, loaded, onRows]);
+  useEffect(() => () => onRows(id, null), [id, onRows]);
   const rows = useMemo(() => sortRows(loaded), [loaded, sortRows]);
   const ids = rows.map((r) => r.id);
-  const on = allOfHere || (ids.length > 0 && rows.every(isChecked));
-  const some = !on && rows.some(isChecked);
-  const flagged = key !== "none";
-  const headCell = "sticky top-9 z-[5] h-10 border-t border-line bg-sunk align-middle";
+  const allOfHere = allOfId === id;
+  /** "every match" is the whole list or another section: the header box reads its rows, a click starts over */
+  const allOfOther = allOfId !== undefined && allOfId !== id;
+  const on = allOfHere || (!split && ids.length > 0 && rows.every(isChecked));
+  const some = !on && !split && rows.some(isChecked);
+  const selectAll = () => onSelectAll({ id, filter: section.filter, label: selectLabel ?? label, total, covers });
+  const flagged = !address && key !== "none" && key !== IP_GROUP_REST;
+  const nested = depth > 0;
+  // top-level headers stick under the column header; an address header inside a flag scrolls with its rows
+  const headCell = nested ? "h-9 border-t border-line bg-panel align-middle" : "sticky top-9 z-[5] h-10 border-t border-line bg-sunk align-middle";
   // as many placeholders as the section will show, so the rows land where the skeleton was
   const expected = Math.min(total, pageSize);
   return (
@@ -1028,43 +1118,76 @@ function UserGroupSection({
               ref={(el) => {
                 if (el) el.indeterminate = some;
               }}
-              disabled={!open || !ids.length || disabled}
-              onChange={() => onSetMany(ids, allOfOther ? true : !on)}
-              aria-label={on ? `Clear the accounts in ${label}` : `Select the loaded accounts in ${label}`}
+              disabled={disabled || (split ? total === 0 : !open || !ids.length)}
+              onChange={() => {
+                if (split) return allOfHere ? onSetMany([], false) : selectAll();
+                onSetMany(ids, allOfOther ? true : !on);
+              }}
+              aria-label={
+                split
+                  ? on
+                    ? `Clear the accounts in ${label}`
+                    : `Select all ${num.format(total)} in ${label}`
+                  : on
+                    ? `Clear the accounts in ${label}`
+                    : `Select the loaded accounts in ${label}`
+              }
             />
           </label>
         </td>
-        <SpanCells cols={colCount} minus={1} className={`${headCell} px-3`}>
+        <SpanCells cols={colCount} minus={1} className={`${headCell} ${nested ? "pl-8 pr-3" : "px-3"}`}>
           <div className="flex min-w-0 items-center gap-2">
-            <button type="button" className="flex min-w-0 items-center gap-2 text-left" aria-expanded={open} onClick={onToggle} title={sentence(help)}>
+            <button
+              type="button"
+              className="flex min-w-0 items-center gap-2 text-left"
+              aria-expanded={open}
+              onClick={() => onToggle(id)}
+              title={sentence(help)}
+            >
               <ChevronRight aria-hidden className={`h-3.5 w-3.5 shrink-0 text-ink3 transition-transform ${open ? "rotate-90" : ""}`} />
-              <span className={`chip shrink-0 ${flagged ? "bg-warn-soft text-warn" : "bg-panel text-ink2"}`}>
-                {flagged ? "⚑ " : ""}
-                {label}
-              </span>
+              {address ? (
+                <span className="min-w-0 truncate font-mono text-xs font-semibold text-ink">{label}</span>
+              ) : (
+                <span className={`chip shrink-0 ${flagged ? "bg-warn-soft text-warn" : "bg-panel text-ink2"}`}>
+                  {flagged ? "⚑ " : ""}
+                  {label}
+                </span>
+              )}
               <span className="shrink-0 text-xs tabular-nums text-ink2">{accounts(total)}</span>
-              <span className="hidden min-w-0 truncate text-xs text-ink3 sm:inline">{help}</span>
+              <span className="hidden min-w-0 truncate text-xs text-ink3 sm:inline">{split ? `${help}, by address` : help}</span>
             </button>
-            <span className="ml-auto shrink-0 text-xs">
+            <span className="ml-auto flex shrink-0 items-center gap-1 text-xs">
               {allOfHere ? (
                 <span className="text-ink2">All {num.format(total)} selected</span>
               ) : (
+                !split &&
                 on &&
                 total > rows.length && (
-                  <button type="button" className="btn-ghost h-7 px-2 text-xs" disabled={disabled} onClick={onSelectAll}>
+                  <button type="button" className="btn-ghost h-7 px-2 text-xs" disabled={disabled} onClick={selectAll}>
                     Select all {num.format(total)}
                   </button>
                 )
+              )}
+              {address && (
+                <button
+                  type="button"
+                  className="btn-ghost h-7 px-2 text-xs"
+                  onClick={() => onlyAddress(key)}
+                  title={`List only the accounts that signed up from ${key}, whatever their flags`}
+                >
+                  Only this address
+                </button>
               )}
             </span>
           </div>
         </SpanCells>
       </tr>
-      {open && list.isPending && Array.from({ length: expected }, (_, i) => skeletonRow(i, `${key}-sk-${i}`))}
-      {open && rows.map((r) => renderRow(r, `${key}-${r.id}`))}
-      {open && list.hasNextPage && (
+      {open && split && <AddressSections parentId={id} parent={section} parentCovers={covers} shared={shared} />}
+      {open && !split && list.isPending && Array.from({ length: expected }, (_, i) => skeletonRow(i, `${id}-sk-${i}`))}
+      {open && !split && rows.map((r) => renderRow(r, `${id}-${r.id}`))}
+      {open && !split && list.hasNextPage && (
         <tr>
-          <SpanCells cols={colCount} className="h-11 border-t border-line px-3 text-xs text-ink3">
+          <SpanCells cols={colCount} className={`h-11 border-t border-line text-xs text-ink3 ${nested ? "pl-8 pr-3" : "px-3"}`}>
             <div className="flex items-center justify-between gap-3">
               <span className="tabular-nums">
                 {num.format(rows.length)} of {num.format(total)} in {label}
@@ -1077,6 +1200,67 @@ function UserGroupSection({
         </tr>
       )}
     </>
+  );
+}
+
+/**
+ * A split flag section's contents: the same accounts grouped by sign-up address (the server's group by ip over the
+ * section's filter), busiest address first, each its own section with its own paging and "Select all".
+ */
+function AddressSections({
+  parentId,
+  parent,
+  parentCovers,
+  shared,
+}: {
+  parentId: string;
+  parent: SectionData;
+  parentCovers: (r: Row) => boolean;
+  shared: SectionShared;
+}) {
+  const trpc = useTRPC();
+  const groups = useQuery(trpc.admin.users.groups.queryOptions({ ...parent.filter, by: "ip", limit: 0 }, { placeholderData: keepPreviousData }));
+  const subs: SectionData[] = groups.data?.groups ?? [];
+  if (groups.error)
+    return (
+      <tr>
+        <SpanCells cols={shared.colCount} className="h-11 border-t border-line pl-8 pr-3 text-xs text-err">
+          {groups.error.message}
+        </SpanCells>
+      </tr>
+    );
+  if (groups.isPending)
+    return <>{Array.from({ length: Math.min(parent.total, LIST_SKELETON_ROWS) }, (_, i) => shared.skeletonRow(i, `${parentId}-sk-${i}`))}</>;
+  return (
+    <>
+      {subs.map((g) => {
+        const own = sectionCovers("ip", g.key, subs);
+        return (
+          <UserGroupSection
+            key={g.key}
+            id={`${parentId}/ip:${g.key}`}
+            section={g}
+            address={g.key !== IP_GROUP_REST}
+            depth={1}
+            selectLabel={`${parent.label} · ${g.label}`}
+            covers={(r) => parentCovers(r) && own(r)}
+            shared={shared}
+          />
+        );
+      })}
+      {!!groups.data?.moreSections && <MoreAddresses n={groups.data.moreSections} cols={shared.colCount} nested />}
+    </>
+  );
+}
+
+/** Group by address lists the busiest MAX_IP_GROUPS addresses; this row says how many were left out. */
+function MoreAddresses({ n, cols, nested = false }: { n: number; cols: { folded: number; full: number }; nested?: boolean }) {
+  return (
+    <tr>
+      <SpanCells cols={cols} className={`h-11 border-t border-line text-xs text-ink3 ${nested ? "pl-8 pr-3" : "px-3"}`}>
+        {num.format(n)} more shared address{n === 1 ? "" : "es"} not shown. Search or filter to narrow the list.
+      </SpanCells>
+    </tr>
   );
 }
 

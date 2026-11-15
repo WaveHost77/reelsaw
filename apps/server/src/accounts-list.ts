@@ -6,7 +6,20 @@
 import { and, desc, inArray, sql, type SQL } from "drizzle-orm";
 import type { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { ABUSE_FLAGS, type AbuseFlag, FLAG_GROUPS, type FlagGroup, flagGroupHelp, flagGroupLabel, isAbuseFlag } from "@reelsaw/shared";
+import {
+  ABUSE_FLAGS,
+  type AbuseFlag,
+  FLAG_GROUPS,
+  type FlagGroup,
+  flagGroupHelp,
+  flagGroupLabel,
+  IP_GROUP_REST,
+  ipGroupHelp,
+  ipGroupLabel,
+  isAbuseFlag,
+  MAX_IP_GROUPS,
+  type UserGroupBy,
+} from "@reelsaw/shared";
 import { schema, type Db } from "./db/index.js";
 import type { Services } from "./services.js";
 import { decodeCursor, pageOf } from "./pagination.js";
@@ -39,6 +52,8 @@ export function userFilterWhere(f: Omit<UserFilter, "q">): SQL | undefined {
     f.verified === undefined ? undefined : sql`${U.emailVerified} = ${f.verified}`,
     f.heldBy ? sql`${U.heldBy} = ${f.heldBy}` : undefined,
     f.group ? flagGroupWhere(f.group.key) : undefined,
+    f.signupIp ? sql`${U.signupIp} = ${f.signupIp}` : undefined,
+    f.sharedIp === undefined ? undefined : f.sharedIp ? sharedIp : sql`not ${sharedIp}`,
   );
 }
 
@@ -46,47 +61,93 @@ export function userFilterWhere(f: Omit<UserFilter, "q">): SQL | undefined {
 const flagGroupWhere = (k: FlagGroup): SQL => (k === "none" ? sql`jsonb_array_length(${U.flags}) = 0` : sql`${U.flags} @> ${JSON.stringify([k])}::jsonb`);
 
 /**
+ * Another account signed up from this account's address (any account, not only the filtered ones, so an address's
+ * section does not depend on the filter). `user_signup_ip_idx` answers it. Accounts with no address are never shared.
+ */
+const sharedIp = sql`(${U.signupIp} is not null and exists (select 1 from ${U} as other where other.signup_ip = ${U.signupIp} and other.id <> ${U.id}))`;
+
+type Section = { key: string; label: string; help: string; total: number; filter: UserFilter };
+
+/** The section keys and counts of one grouping over `where`, in display order, and how many sections were left out. */
+async function sectionsOf(db: Db, by: UserGroupBy, filter: UserFilter, where: SQL): Promise<{ sections: Section[]; moreSections: number }> {
+  return db.transaction(async (tx) => {
+    await setSearchThreshold(tx);
+    if (by === "ip") {
+      // the busiest addresses first, then the one with the newest sign-up; `addresses` counts them all, before the limit
+      const [shared, [rest] = []] = await Promise.all([
+        tx.execute<{ key: string; n: number; addresses: number }>(
+          sql`select ${U.signupIp} as key, count(*)::int as n, (count(*) over ())::int as addresses from ${U} where ${where} and ${sharedIp} group by 1 order by 2 desc, max(${U.createdAt}) desc, 1 limit ${MAX_IP_GROUPS}`,
+        ),
+        tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(U)
+          .where(and(where, sql`not ${sharedIp}`)),
+      ]);
+      const sections: Section[] = shared.rows.map((r) => ({
+        key: r.key,
+        label: ipGroupLabel(r.key),
+        help: ipGroupHelp(r.key),
+        total: Number(r.n),
+        filter: { ...filter, signupIp: r.key },
+      }));
+      if (rest && rest.n > 0)
+        sections.push({
+          key: IP_GROUP_REST,
+          label: ipGroupLabel(IP_GROUP_REST),
+          help: ipGroupHelp(IP_GROUP_REST),
+          total: rest.n,
+          filter: { ...filter, sharedIp: false },
+        });
+      return { sections, moreSections: Math.max(0, Number(shared.rows[0]?.addresses ?? 0) - shared.rows.length) };
+    }
+    // a left join keeps the accounts with no flag, as a null key
+    const byKey = await tx.execute<{ key: string | null; n: number }>(
+      sql`select f.v as key, count(*)::int as n from ${U} left join lateral jsonb_array_elements_text(${U.flags}) as f(v) on true where ${where} group by 1`,
+    );
+    const counts = new Map<FlagGroup, number>();
+    for (const r of byKey.rows) {
+      const k: FlagGroup | null = r.key === null ? "none" : isAbuseFlag(r.key) ? r.key : null;
+      if (k) counts.set(k, Number(r.n));
+    }
+    const sections = FLAG_GROUPS.filter((k) => counts.get(k)).map((key) => ({
+      key,
+      label: flagGroupLabel(key),
+      help: flagGroupHelp(key),
+      total: counts.get(key) ?? 0,
+      filter: { ...filter, group: { by: "flag" as const, key } },
+    }));
+    return { sections, moreSections: 0 };
+  });
+}
+
+/**
  * The filtered list in sections (Users page "Group", `list_users` groupBy, `reelsaw users --group`): every section
- * that has accounts, in FLAG_GROUPS order, with its count over the whole filter (not a loaded page), the filter
- * that lists or acts on exactly it (`group` set), and, unless `limit` is 0, its first page from `listUsers`.
- * `total` counts each account once, though one with two flags is in two sections.
+ * that has accounts, with its count over the whole filter (not a loaded page), the filter that lists or acts on
+ * exactly it, and, unless `limit` is 0, its first page from `listUsers`. By flag: FLAG_GROUPS order, the section's
+ * filter sets `group`. By address: the shared addresses, busiest first (at most MAX_IP_GROUPS; `moreSections`
+ * counts the rest), each filtered by `signupIp`, then `rest` (`sharedIp: false`). `total` counts each account
+ * once, though one with two flags is in two flag sections.
  */
 export async function userGroups(svc: Services, input: z.input<typeof userGroupsInput>) {
   const { by, limit = 20, ...filter } = input;
   const db = svc.database.db;
-  const ws = words(filter.q ?? "");
-  const where = and(userMatch(ws), userFilterWhere(filter)) ?? sql`true`;
-  const [byKey, [{ total } = { total: 0 }]] = await db.transaction(async (tx) => {
-    await setSearchThreshold(tx);
-    return Promise.all([
-      // a left join keeps the accounts with no flag, as a null key
-      tx.execute<{ key: string | null; n: number }>(
-        sql`select f.v as key, count(*)::int as n from ${U} left join lateral jsonb_array_elements_text(${U.flags}) as f(v) on true where ${where} group by 1`,
-      ),
-      tx.select({ total: sql<number>`count(*)::int` }).from(U).where(where),
-    ]);
-  });
-  const counts = new Map<FlagGroup, number>();
-  for (const r of byKey.rows) {
-    const k: FlagGroup | null = r.key === null ? "none" : isAbuseFlag(r.key) ? r.key : null;
-    if (k) counts.set(k, Number(r.n));
-  }
+  const where = and(userMatch(words(filter.q ?? "")), userFilterWhere(filter)) ?? sql`true`;
+  const [{ sections, moreSections }, total] = await Promise.all([
+    sectionsOf(db, by, filter, where),
+    db.transaction(async (tx) => {
+      await setSearchThreshold(tx);
+      const [r] = await tx.select({ total: sql<number>`count(*)::int` }).from(U).where(where);
+      return r?.total ?? 0;
+    }),
+  ]);
   const groups = await Promise.all(
-    FLAG_GROUPS.filter((k) => counts.get(k)).map(async (key) => {
-      const f: UserFilter = { ...filter, group: { by, key } };
-      const page = limit > 0 ? await listUsers(svc, { ...f, limit }) : null;
-      return {
-        key,
-        label: flagGroupLabel(key),
-        help: flagGroupHelp(key),
-        total: counts.get(key) ?? 0,
-        /** list_users / manage_users / the bulk bar with exactly this section */
-        filter: f,
-        ...(page ? { items: page.items, nextCursor: page.nextCursor } : {}),
-      };
+    sections.map(async (s) => {
+      const page = limit > 0 ? await listUsers(svc, { ...s.filter, limit }) : null;
+      /** `filter`: list_users / manage_users / the bulk bar with exactly this section */
+      return { ...s, ...(page ? { items: page.items, nextCursor: page.nextCursor } : {}) };
     }),
   );
-  return { by, total, groups };
+  return { by, total, moreSections, groups };
 }
 
 /**

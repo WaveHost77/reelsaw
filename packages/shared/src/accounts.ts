@@ -170,9 +170,10 @@ export const FLAG_HELP: Record<AbuseFlag, string> = {
  * How the admin's account list can be grouped (Users page "Group", `list_users` groupBy, `reelsaw users --group`).
  * Grouping partitions the same filtered list into sections, each with its own count, paging and "select all";
  * it never narrows it. `flag`: one section per abuse reason, then the accounts with none. An account flagged for
- * two reasons is in both sections (like a multi-select field grouped in a tracker).
+ * two reasons is in both sections (like a multi-select field grouped in a tracker). `ip`: one section per sign-up
+ * address that more than one account shares, most accounts first, then the rest (`IP_GROUP_REST`).
  */
-export const USER_GROUP_BY = ["flag"] as const;
+export const USER_GROUP_BY = ["flag", "ip"] as const;
 export type UserGroupBy = (typeof USER_GROUP_BY)[number];
 export const isUserGroupBy = (v: unknown): v is UserGroupBy => USER_GROUP_BY.some((g) => g === v);
 /** The sections of group-by-flag, in display order; `none` = not flagged, last. */
@@ -183,3 +184,13 @@ export const flagGroupLabel = (k: FlagGroup): string => (k === "none" ? "not fla
 export const flagGroupHelp = (k: FlagGroup): string => (k === "none" ? "no abuse flag from the hourly pass" : FLAG_HELP[k]);
 /** Whether an account (its `flags`) is in a group-by-flag section: the same rule as the server's filter. */
 export const inFlagGroup = (flags: readonly string[], k: FlagGroup): boolean => (k === "none" ? flags.length === 0 : flags.includes(k));
+
+/** Group-by-address's last section: accounts that are the only one from their sign-up address, or have none recorded. */
+export const IP_GROUP_REST = "rest";
+/** Group-by-address lists at most this many addresses (most accounts first); the result says how many more there are. */
+export const MAX_IP_GROUPS = 100;
+export const ipGroupLabel = (key: string): string => (key === IP_GROUP_REST ? "address not shared" : key);
+export const ipGroupHelp = (key: string): string =>
+  key === IP_GROUP_REST ? "the only account from its sign-up address, or no address recorded" : "signed up from this address";
+/** The flag sections that mean "several accounts from one address": the Users page splits them by address. */
+export const ADDRESS_FLAGS: readonly AbuseFlag[] = ["shared_ip", "signup_burst"];
