@@ -5,7 +5,7 @@ import type { Logger } from "../log.js";
 import type { ProviderGate } from "./gate.js";
 import { APICallError } from "@ai-sdk/provider";
 import { compatTranscriptionModel } from "./compat-transcription.js";
-import { isStale, memoryVerdictStore, probeWordTimestamps, verdictKey, type VerdictStore, type WordTimestampVerdict } from "./word-timestamps.js";
+import { isStale, memoryVerdictStore, PROBE_READER, probeWordTimestamps, verdictKey, type VerdictStore, type WordTimestampVerdict } from "./word-timestamps.js";
 
 /**
  * Models are addressed as "<provider>:<model>" and the two roles are independent, e.g.
@@ -155,7 +155,7 @@ export function createAi(
     // OpenAI itself prefers the Responses API; OpenAI-compatible servers (Ollama, vLLM, LM Studio,
     // Speaches…) usually only implement Chat Completions, so default to chat when a base URL is set.
     const mode = config.OPENAI_API_MODE ?? (openaiCreds.baseUrl ? "chat" : "responses");
-    const openaiProvider =
+    const openaiBase =
       mode === "chat"
         ? customProvider({
             fallbackProvider: openai,
@@ -163,6 +163,17 @@ export function createAi(
             languageModels: new Proxy({} as Record<string, LanguageModel>, { has: () => true, get: (_t, id: string) => openai.chat(id) }),
           })
         : openai;
+    // OPENAI_BASE_URL makes "openai" a compatible server (Speaches in the local-ai setup): read its transcriptions
+    // as one (ai/compat-transcription.ts), since @ai-sdk/openai takes segments over the words it asked for
+    const openaiProvider = openaiCreds.baseUrl
+      ? customProvider({
+          fallbackProvider: openaiBase,
+          transcriptionModels: new Proxy({} as Record<string, TranscriptionModel>, {
+            has: () => true,
+            get: (_t, id: string) => compatTranscriptionModel({ provider: "openai", baseURL: openaiCreds.baseUrl!, apiKey: openaiCreds.apiKey }, id),
+          }),
+        })
+      : openaiBase;
     const providers: Record<string, any> = {
       openai: openaiProvider,
       anthropic: createAnthropic(key("anthropic")),
@@ -363,6 +374,7 @@ export function createAi(
           segments: 0,
           text: `the server refused the request for word timestamps (HTTP ${status}: ${msg.slice(0, 160)})`,
           checkedAt: new Date().toISOString(),
+          reader: PROBE_READER,
         };
       // a key, network or rate-limit failure says nothing new: keep the last result rather than refuse a model that worked
       else if (previous && !fresh) {
