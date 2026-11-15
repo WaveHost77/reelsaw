@@ -11,7 +11,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  * Commands
  *   version [--json]                        running version, latest published release, how to upgrade
  *   releases [--json] [--limit n]           published versions from GitHub (reelsaw.com/releases / list_releases)
- *   users [--q text] [--status s] [--verified yes|no] [--flagged yes] [--flag reason] [--held rule] [--limit n] [--cursor c] [--json]
+ *   users [--q text] [--status s] [--verified yes|no] [--flagged yes] [--flag shared_ip|signup_burst|disposable_email] [--held rule] [--limit n] [--cursor c] [--json]
  *                                           list accounts a page at a time: role, status, email verified, sign-up date
  *   users-bulk <approve|hold|suspend|reinstate|delete> (<email…> | --all | filter flags) [--reason text]
  *                                           act on many accounts (same as the Users selection bar and manage_users);
