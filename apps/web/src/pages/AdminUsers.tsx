@@ -1,12 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTRPC, useTRPCClient } from "../lib/trpc";
 import { useMe } from "../lib/account";
 import { readHash, useHashParams, writeHash } from "../lib/hash";
-import { Users } from "lucide-react";
+import { ChevronRight, Users } from "lucide-react";
 import { toast } from "sonner";
-import { ABUSE_FLAGS, type AbuseFlag, FLAG_HELP, FLAG_LABEL, formatBytes, isAbuseFlag } from "@reelsaw/shared";
+import {
+  ABUSE_FLAGS,
+  type AbuseFlag,
+  FLAG_HELP,
+  FLAG_LABEL,
+  type FlagGroup,
+  formatBytes,
+  inFlagGroup,
+  isAbuseFlag,
+  isUserGroupBy,
+  type UserGroupBy,
+} from "@reelsaw/shared";
 import { ago } from "../lib/time";
 import { ScrollArea } from "../components/scroll-area";
 import {
@@ -67,6 +78,23 @@ const readFlag = (h: URLSearchParams): FlagFilter => {
   return isAbuseFlag(f) ? f : h.get("flagged") === "1" ? "any" : "";
 };
 const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** "Group": one section per abuse reason (then the unflagged), or one flat list. In the hash as group=flag. */
+const GROUP_OPTIONS = [
+  { value: "", label: "No grouping" },
+  { value: "flag", label: "Group by flag" },
+];
+const asGroup = (v: string | null): UserGroupBy | "" => (isUserGroupBy(v) ? v : "");
+/** What "every match" means for the selection bar: the whole filtered list, or one section of it. */
+type AllOf = { key: FlagGroup | null };
+type UserFilterInput = {
+  q?: string | undefined;
+  flagged?: boolean | undefined;
+  flag?: AbuseFlag | undefined;
+  status?: Status | undefined;
+  verified?: boolean | undefined;
+  heldBy?: string | undefined;
+  group?: { by: UserGroupBy; key: FlagGroup } | undefined;
+};
 type SortKey = "name" | "status" | "projects" | "sourceMinutes" | "clipsRendered" | "storedBytes" | "lastActive";
 
 const STATUS: Record<Status, { glyph: string; tone: string; word: string }> = {
@@ -138,8 +166,12 @@ export function AdminUsersPage() {
   const [limitsFor, setLimitsFor] = useState<Row | null>(null);
   const [banReason, setBanReason] = useState("");
   const [sel, setSel] = useState<string[]>([]);
-  /** the selection is every account matching the filters, not only the checked rows */
-  const [allMatching, setAllMatching] = useState(false);
+  /** the selection is every account matching the filters (or one section of them), not only the checked rows */
+  const [allOf, setAllOf] = useState<AllOf | null>(null);
+  const allMatching = allOf !== null;
+  const [groupBy, setGroupBy] = useState<UserGroupBy | "">(() => asGroup(readHash().get("group")));
+  /** collapsed sections; the unflagged start folded, since grouping by flag is for looking at the flagged */
+  const [closed, setClosed] = useState<ReadonlySet<FlagGroup>>(() => new Set(["none"]));
   /** how far a bulk run has got; local because one run is several calls */
   const [progress, setProgress] = useState<{ done: number; of: number } | null>(null);
   // a pasted link, back/forward or a hash edit re-applies the filters (our own writes do not notify the router)
@@ -152,10 +184,11 @@ export function AdminUsersPage() {
     setStatus(asStatus(h.get("status")));
     setVerified(asYesNo(h.get("verified")));
     setHeldBy(h.get("held") ?? "");
+    setGroupBy(asGroup(h.get("group")));
   }, [hashKey]);
   const q = useDebounced(search.trim(), 200);
   const filter = useMemo(
-    () => ({
+    (): UserFilterInput => ({
       q: q || undefined,
       flagged: flag === "any" || undefined,
       flag: flag && flag !== "any" ? flag : undefined,
@@ -173,18 +206,35 @@ export function AdminUsersPage() {
       status: status || null,
       verified: verified || null,
       held: heldBy || null,
+      group: groupBy || null,
     });
     // a selection made under other filters is not what the new list shows
     setSel([]);
-    setAllMatching(false);
-  }, [q, flag, status, verified, heldBy]);
+    setAllOf(null);
+  }, [q, flag, status, verified, heldBy, groupBy]);
   // server-side paging; each account carries its all-time usage, so there is no separate usage query
   const list = useInfiniteQuery(
     trpc.admin.users.list.infiniteQueryOptions(
       { ...filter, limit: PAGE },
-      { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData },
+      { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData, enabled: !groupBy },
     ),
   );
+  // grouped: the sections and their counts over the whole filter; each open section pages its own rows
+  const groups = useQuery(
+    trpc.admin.users.groups.queryOptions({ ...filter, by: groupBy || "flag", limit: 0 }, { enabled: !!groupBy, placeholderData: keepPreviousData }),
+  );
+  const sections = groupBy ? (groups.data?.groups ?? []) : [];
+  /** the rows each mounted section has loaded, so selection and bulk targets see every one of them */
+  const [groupRows, setGroupRows] = useState<Partial<Record<FlagGroup, Row[]>>>({});
+  const onGroupRows = useCallback((key: FlagGroup, r: Row[] | null) => {
+    setGroupRows((cur) => {
+      if (cur[key] === r || (!r && !(key in cur))) return cur;
+      const next = { ...cur };
+      if (r) next[key] = r;
+      else delete next[key];
+      return next;
+    });
+  }, []);
   // counted over every account, not the loaded page
   const pendingCount = useQuery(trpc.admin.users.pendingCount.queryOptions());
   const flagCounts = useQuery(trpc.admin.users.flagCounts.queryOptions());
@@ -209,11 +259,31 @@ export function AdminUsersPage() {
   const ban = useMutation({ ...trpc.admin.users.ban.mutationOptions(), onSuccess: done("Suspended"), onError: fail });
   const unban = useMutation({ ...trpc.admin.users.unban.mutationOptions(), onSuccess: done("Reinstated"), onError: fail });
   const remove = useMutation({ ...trpc.admin.users.remove.mutationOptions(), onSuccess: done("Account deleted"), onError: fail });
-  const loaded = useMemo(() => (list.data?.pages.flatMap((pg) => pg.items) ?? []) as Row[], [list.data]);
-  const total = list.data?.pages[0]?.total ?? 0;
+  const loaded = useMemo(() => {
+    if (!groupBy) return (list.data?.pages.flatMap((pg) => pg.items) ?? []) as Row[];
+    // an account flagged for two reasons is in two sections: once here
+    const byId = new Map<string, Row>();
+    for (const rs of Object.values(groupRows)) for (const r of rs ?? []) byId.set(r.id, r);
+    return [...byId.values()];
+  }, [groupBy, list.data, groupRows]);
+  const total = groupBy ? (groups.data?.total ?? 0) : (list.data?.pages[0]?.total ?? 0);
+  /** the filter "every match" acts on: the whole list, or the one section picked */
+  const allFilter = (a: AllOf): UserFilterInput => (a.key && groupBy ? { ...filter, group: { by: groupBy, key: a.key } } : filter);
+  const allTotal = allOf?.key ? (sections.find((g) => g.key === allOf.key)?.total ?? 0) : total;
+  const allLabel = allOf?.key ? `every account in “${sections.find((g) => g.key === allOf.key)?.label ?? allOf.key}”` : "every matching account";
   /** One action over the selection: chunks of checked ids, or every page of the filter until the server says it is done. */
   const bulk = useMutation({
-    mutationFn: async ({ action, ids, reason }: { action: BulkAction; ids: string[] | null; reason?: string | undefined }) => {
+    mutationFn: async ({
+      action,
+      ids,
+      filter: every,
+      reason,
+    }: {
+      action: BulkAction;
+      ids: string[] | null;
+      filter?: UserFilterInput | undefined;
+      reason?: string | undefined;
+    }) => {
       const sum: BulkResult = { changed: 0, unchanged: 0, skipped: [] };
       const add = (r: BulkResult) => {
         sum.changed += r.changed;
@@ -226,21 +296,21 @@ export function AdminUsersPage() {
       } else {
         let cursor: string | undefined;
         do {
-          const r = await client.admin.users.bulk.mutate({ action, filter, cursor, reason });
+          const r = await client.admin.users.bulk.mutate({ action, filter: every ?? filter, cursor, reason });
           add(r);
           cursor = r.nextCursor ?? undefined;
         } while (cursor);
       }
       return { action, ...sum };
     },
-    onMutate: ({ ids }) => setProgress({ done: 0, of: ids?.length ?? total }),
+    onMutate: ({ ids }) => setProgress({ done: 0, of: ids?.length ?? allTotal }),
     onSuccess: (r) => {
       const parts = [`${BULK_DONE[r.action]} ${accounts(r.changed)}`];
       if (r.unchanged) parts.push(`${num.format(r.unchanged)} left as they were`);
       if (r.skipped.length) parts.push(`${num.format(r.skipped.length)} skipped: ${r.skipped[0]!.reason}`);
       toast(parts.join(" · "));
       setSel([]);
-      setAllMatching(false);
+      setAllOf(null);
     },
     onError: fail,
     onSettled: () => {
@@ -254,26 +324,29 @@ export function AdminUsersPage() {
     const live = new Set(loaded.map((r) => r.id));
     setSel((cur) => (cur.every((x) => live.has(x)) ? cur : cur.filter((x) => live.has(x))));
   }, [loaded]);
-  // sorting is client side, over the rows loaded so far
-  const rows = useMemo(() => {
-    const base = loaded;
-    if (!sort) return base;
-    const val = (r: Row): string | number => {
-      switch (sort.key) {
-        case "name":
-          return (r.name || r.email).toLowerCase();
-        case "status":
-          return r.status;
-        case "lastActive":
-          return r.lastActive ? new Date(r.lastActive).getTime() : 0;
-        case "projects":
-          return r.usage.projects;
-        default:
-          return r.usage[sort.key];
-      }
-    };
-    return [...base].sort((x, y) => (val(x) < val(y) ? -sort.dir : val(x) > val(y) ? sort.dir : 0));
-  }, [loaded, sort]);
+  // sorting is client side, over the rows loaded so far (within each section when grouped)
+  const sortRows = useCallback(
+    (base: Row[]) => {
+      if (!sort) return base;
+      const val = (r: Row): string | number => {
+        switch (sort.key) {
+          case "name":
+            return (r.name || r.email).toLowerCase();
+          case "status":
+            return r.status;
+          case "lastActive":
+            return r.lastActive ? new Date(r.lastActive).getTime() : 0;
+          case "projects":
+            return r.usage.projects;
+          default:
+            return r.usage[sort.key];
+        }
+      };
+      return [...base].sort((x, y) => (val(x) < val(y) ? -sort.dir : val(x) > val(y) ? sort.dir : 0));
+    },
+    [sort],
+  );
+  const rows = useMemo(() => sortRows(loaded), [loaded, sortRows]);
   const pending = pendingCount.data ?? 0;
 
   const selfId = me.data?.id;
@@ -282,8 +355,15 @@ export function AdminUsersPage() {
   const allOn = allIds.length > 0 && allIds.every((id) => sel.includes(id));
   const someOn = !allOn && sel.length > 0;
   const toggle = (id: string) => {
-    setAllMatching(false);
+    setAllOf(null);
     setSel((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  };
+  /** checked: picked by hand, or inside what "every match" covers (the whole list, or that section) */
+  const isChecked = (r: Row) => (allOf ? !allOf.key || inFlagGroup(r.flags, allOf.key) : sel.includes(r.id));
+  /** a section header's checkbox: its loaded rows on or off together */
+  const setMany = (ids: string[], on: boolean) => {
+    setAllOf(null);
+    setSel((cur) => (on ? [...new Set([...cur, ...ids])] : cur.filter((x) => !ids.includes(x))));
   };
   /** The checked rows each action can change (an approved account needs no approval, nobody suspends or deletes themself). */
   const applies: Record<BulkAction, (r: Row) => boolean> = {
@@ -294,14 +374,212 @@ export function AdminUsersPage() {
     delete: (r) => r.id !== selfId,
   };
   const targets = (a: BulkAction) => selected.filter(applies[a]);
-  const selCount = allMatching ? total : selected.length;
+  const selCount = allOf ? allTotal : selected.length;
   const runBulk = (action: BulkAction, reason?: string) =>
-    bulk.mutate({ action, ids: allMatching ? null : targets(action).map((r) => r.id), reason: reason || undefined });
+    bulk.mutate({ action, ids: allOf ? null : targets(action).map((r) => r.id), filter: allOf ? allFilter(allOf) : undefined, reason: reason || undefined });
   /** What a bulk action acts on, for its title and its confirm: "every matching account (1,204)" or "3 accounts". */
-  const scope = (a: BulkAction) => (allMatching ? `every matching account (${num.format(total)})` : accounts(targets(a).length));
+  const scope = (a: BulkAction) => (allOf ? `${allLabel} (${num.format(allTotal)})` : accounts(targets(a).length));
   const bulkOff = (a: BulkAction) => busy || (!allMatching && targets(a).length === 0);
   const bulkTitle = (a: BulkAction, verb: string, none: string) => (bulkOff(a) && !busy ? none : `${verb} ${scope(a)}`);
 
+  const skeletonRow = (i: number, key: string | number = i) => (
+    <ListRow key={key} tall skeleton>
+      <ListCell />
+      <ListCell>
+        <Skeleton className={`h-4 ${["w-2/5", "w-1/2", "w-1/3", "w-3/5", "w-2/5"][i % 5]}`} />
+        <Skeleton className="mt-1.5 h-3 w-3/5" />
+        <Skeleton className="mt-1.5 h-3 w-4/5 min-[1040px]:hidden" />
+      </ListCell>
+      <ListCell full>
+        <Skeleton className="h-3.5 w-16" />
+      </ListCell>
+      {[0, 1, 2].map((j) => (
+        <ListCell key={j} full>
+          <Skeleton className="ml-auto h-3.5 w-8" />
+        </ListCell>
+      ))}
+      <ListCell full>
+        <Skeleton className="ml-auto h-3.5 w-12" />
+      </ListCell>
+      <ListCell full>
+        <Skeleton className="h-3.5 w-14" />
+      </ListCell>
+      <ListCell>
+        <Skeleton className="ml-auto h-8 w-8 rounded-[8px] min-[1040px]:w-full" />
+      </ListCell>
+    </ListRow>
+  );
+  const renderRow = (r: Row, key: string): ReactNode => {
+    const st = STATUS[r.status];
+    const self = r.id === selfId;
+    const checked = isChecked(r);
+    const u = r.usage;
+    const line = `${num.format(u.projects)} projects · ${num.format(u.sourceMinutes)} min · ${num.format(u.clipsRendered)} clips · ${formatBytes(u.storedBytes)}`;
+    const model = `All time: ${num.format(u.llmCalls)} model calls, ${Math.round(u.llmInputTokens / 1000)}k tokens in, ${Math.round(u.llmOutputTokens / 1000)}k out`;
+    const active = r.lastActive ? ago(r.lastActive) : "never";
+    const stateLabel = r.status === "pending" ? "Approve" : r.status === "suspended" ? "Reinstate" : "Suspend";
+    const stateOff = busy || (self && r.status === "active");
+    const stateWhy = self && r.status === "active" ? "You cannot suspend your own account" : undefined;
+    const stateRun = () => {
+      if (r.status === "pending") approve.mutate({ id: r.id });
+      else if (r.status === "suspended") unban.mutate({ id: r.id });
+      else {
+        setBanReason("");
+        setConfirm({ kind: "ban", row: r });
+      }
+    };
+    return (
+      <ListRow key={key} tall active={checked}>
+        <ListCell className="relative !p-0">
+          <label className={`absolute inset-0 flex cursor-pointer items-center justify-center ${checked ? "opacity-100" : "opacity-0"} ${LIST_REVEAL_ROW}`}>
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-[var(--acc)]"
+              checked={checked}
+              disabled={allMatching || bulk.isPending}
+              onChange={() => toggle(r.id)}
+              aria-label={`Select ${r.email}`}
+            />
+          </label>
+        </ListCell>
+        <ListCell title={model}>
+          <div className="flex items-center gap-2">
+            <span className={`min-w-0 ${LIST_TITLE}`}>{r.name || r.email}</span>
+            {r.role === "admin" && <span className="chip shrink-0 bg-acc-soft text-acc-text">admin</span>}
+            {r.mustChangePassword && (
+              <span className="chip shrink-0 bg-warn-soft text-warn" title="reelsaw set-password --must-change: they pick a new password at next sign-in">
+                must change password
+              </span>
+            )}
+            {r.plan && r.plan !== "free" && <span className="chip shrink-0 bg-sunk text-ink2">{r.plan}</span>}
+            {r.status === "pending" && r.heldBy && (
+              // the kind only ("held · email"), so the name keeps its room; the whole rule is in the title.
+              // A click lists everyone that rule held.
+              <button
+                type="button"
+                className="chip shrink-0 bg-sunk text-ink2 hover:text-ink"
+                onClick={() => setHeldBy(r.heldBy ?? "")}
+                title={`Held for approval by the sign-up rule ${r.heldBy}. They only see “waiting for approval”. Click to list everyone it held.`}
+              >
+                held · {r.heldBy.split(" ")[0]}
+              </button>
+            )}
+            {/* a click lists everyone flagged for the same reason */}
+            {r.flags.filter(isAbuseFlag).map((f) => (
+              <button
+                type="button"
+                key={f}
+                className="chip shrink-0 bg-warn-soft text-warn hover:brightness-110"
+                onClick={() => setFlag(f)}
+                title={`${sentence(FLAG_HELP[f])}${r.signupIp ? ` · signed up from ${r.signupIp}` : ""}. Click to list everyone flagged for this.`}
+              >
+                ⚑ {FLAG_LABEL[f]}
+              </button>
+            ))}
+            {self && <span className="shrink-0 text-xs text-ink3">(you)</span>}
+          </div>
+          {/* the address truncates; whether it is verified always shows */}
+          <div className="flex min-w-0 items-baseline gap-1.5 text-xs text-ink3">
+            <span className="min-w-0 truncate">{r.email}</span>
+            <span
+              className={`shrink-0 ${r.emailVerified ? "text-ok" : "text-warn"}`}
+              title={r.emailVerified ? "They confirmed this address" : "They have not confirmed this address yet"}
+            >
+              {r.emailVerified ? "✓ verified" : "◇ unverified"}
+            </span>
+          </div>
+          <div className={`${LIST_SUB} min-[1040px]:hidden`}>
+            <span className={st.tone}>
+              {st.glyph} {st.word}
+            </span>{" "}
+            · {line} · active {active}
+          </div>
+        </ListCell>
+        <ListCell full className={`text-xs ${st.tone}`} title={r.banReason ?? undefined}>
+          {st.glyph} {st.word}
+        </ListCell>
+        <ListCell full variant="num">
+          {num.format(u.projects)}
+        </ListCell>
+        <ListCell full variant="num">
+          {num.format(u.sourceMinutes)}
+        </ListCell>
+        <ListCell full variant="num">
+          {num.format(u.clipsRendered)}
+        </ListCell>
+        <ListCell full variant="num">
+          {formatBytes(u.storedBytes)}
+        </ListCell>
+        <ListCell full variant="muted">
+          {active}
+        </ListCell>
+        <ListCell variant="actions">
+          <div className="flex items-center justify-end gap-1.5">
+            <button
+              className={`${r.status === "pending" ? "btn-primary" : "btn-ghost"} w-[5.5rem] ${LIST_ACTION}`}
+              disabled={stateOff}
+              title={stateWhy}
+              onClick={stateRun}
+            >
+              {stateLabel}
+            </button>
+            <button className={`btn-ghost w-[4.25rem] ${LIST_ACTION}`} onClick={() => setLimitsFor(r)}>
+              Limits
+            </button>
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <MoreButton aria-label={`More actions for ${r.email}`} />
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className={LIST_MENU}>
+                  <DropdownMenu.Item className={LIST_MENU_ITEM_FOLDED} disabled={stateOff} onSelect={stateRun}>
+                    {stateLabel}
+                    {stateWhy && <span className="menu-hint">not your own</span>}
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item className={LIST_MENU_ITEM_FOLDED} onSelect={() => setLimitsFor(r)}>
+                    Limits…
+                  </DropdownMenu.Item>
+                  {r.status === "active" && (
+                    <DropdownMenu.Item
+                      className="menu-item"
+                      disabled={busy || self || r.role === "admin"}
+                      onSelect={() => setConfirm({ kind: "hold", row: r })}
+                    >
+                      Require approval…
+                      {(self || r.role === "admin") && <span className="menu-hint">{self ? "not your own" : "not an admin"}</span>}
+                    </DropdownMenu.Item>
+                  )}
+                  {r.status === "pending" && (
+                    <DropdownMenu.Item
+                      className="menu-item"
+                      disabled={busy}
+                      onSelect={() => {
+                        setBanReason("");
+                        setConfirm({ kind: "ban", row: r });
+                      }}
+                    >
+                      Suspend
+                    </DropdownMenu.Item>
+                  )}
+                  <DropdownMenu.Item className="menu-item" disabled={busy} onSelect={() => window.setTimeout(() => setRuleFor(r), 0)}>
+                    Add sign-up rule…
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item className="menu-item" disabled={busy || self} onSelect={() => setConfirm({ kind: "role", row: r })}>
+                    {r.role === "admin" ? "Remove admin…" : "Make admin…"}
+                    {self && <span className="menu-hint">not your own</span>}
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item className="menu-item-danger" disabled={busy || self} onSelect={() => setConfirm({ kind: "delete", row: r })}>
+                    Delete account…
+                    {self && <span className="menu-hint">not your own</span>}
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          </div>
+        </ListCell>
+      </ListRow>
+    );
+  };
   const sortable = (k: SortKey, usage?: boolean): NonNullable<ListColumn["sort"]> => ({
     dir: sort?.key === k ? sort.dir : null,
     title: usage ? "All time. Sorts the loaded rows" : "Sorts the loaded rows",
@@ -315,13 +593,13 @@ export function AdminUsersPage() {
           <input
             type="checkbox"
             className="h-4 w-4 accent-[var(--acc)]"
-            checked={allOn || allMatching}
+            checked={allOn || (allOf !== null && !allOf.key)}
             ref={(el) => {
-              if (el) el.indeterminate = someOn && !allMatching;
+              if (el) el.indeterminate = (someOn && !allMatching) || !!allOf?.key;
             }}
             disabled={!allIds.length || bulk.isPending}
             onChange={() => {
-              setAllMatching(false);
+              setAllOf(null);
               setSel(allOn ? [] : allIds);
             }}
             aria-label={allOn ? "Clear selection" : "Select all loaded accounts"}
@@ -340,6 +618,9 @@ export function AdminUsersPage() {
     { label: null, srLabel: "Actions", width: "w-14 min-[1040px]:w-[14rem]" },
   ];
   const filtered = !!(flag || status || verified || heldBy);
+  const listError = groupBy ? groups.error : list.error;
+  const pendingList = groupBy ? groups.isPending : list.isPending;
+  const empty = groupBy ? !!groups.data && !groups.isPlaceholderData && sections.length === 0 : !!list.data && !list.isPlaceholderData && rows.length === 0;
 
   return (
     <ListPage
@@ -360,6 +641,13 @@ export function AdminUsersPage() {
               <span className="sr-only">Clear this filter</span>
             </button>
           )}
+          <Select
+            className="h-[38px] w-[9.5rem]"
+            ariaLabel="Group accounts"
+            value={groupBy}
+            onValueChange={(v) => setGroupBy(asGroup(v))}
+            options={GROUP_OPTIONS}
+          />
           <Select
             className="h-[38px] w-[12rem]"
             ariaLabel="Abuse flag"
@@ -385,222 +673,62 @@ export function AdminUsersPage() {
         </>
       }
     >
-      {list.error && <ListError message={list.error.message} />}
-      {list.data && !list.isPlaceholderData && rows.length === 0 && (
+      {listError && <ListError message={listError.message} />}
+      {empty && (
         <ListEmpty icon={Users} title={q ? `No accounts match “${q}”` : "No accounts match"}>
           {filtered ? "Try another status, email or flag filter." : undefined}
         </ListEmpty>
       )}
-      {(rows.length > 0 || (list.isPending && !list.error)) && (
+      {((groupBy ? sections.length > 0 : rows.length > 0) || (pendingList && !listError)) && (
         <section className="flex flex-col gap-2">
-          <ListTable caption="Accounts, with all-time usage" columns={columns} loading={list.isPending} loadingLabel="Loading accounts…">
-            {list.isPending &&
-              Array.from({ length: LIST_SKELETON_ROWS }, (_, i) => (
-                <ListRow key={i} tall skeleton>
-                  <ListCell />
-                  <ListCell>
-                    <Skeleton className={`h-4 ${["w-2/5", "w-1/2", "w-1/3", "w-3/5", "w-2/5"][i]}`} />
-                    <Skeleton className="mt-1.5 h-3 w-3/5" />
-                    <Skeleton className="mt-1.5 h-3 w-4/5 min-[1040px]:hidden" />
-                  </ListCell>
-                  <ListCell full>
-                    <Skeleton className="h-3.5 w-16" />
-                  </ListCell>
-                  {[0, 1, 2].map((j) => (
-                    <ListCell key={j} full>
-                      <Skeleton className="ml-auto h-3.5 w-8" />
-                    </ListCell>
-                  ))}
-                  <ListCell full>
-                    <Skeleton className="ml-auto h-3.5 w-12" />
-                  </ListCell>
-                  <ListCell full>
-                    <Skeleton className="h-3.5 w-14" />
-                  </ListCell>
-                  <ListCell>
-                    <Skeleton className="ml-auto h-8 w-8 rounded-[8px] min-[1040px]:w-full" />
-                  </ListCell>
-                </ListRow>
-              ))}
-            {rows.map((r) => {
-              const st = STATUS[r.status];
-              const self = r.id === selfId;
-              const checked = allMatching || sel.includes(r.id);
-              const u = r.usage;
-              const line = `${num.format(u.projects)} projects · ${num.format(u.sourceMinutes)} min · ${num.format(u.clipsRendered)} clips · ${formatBytes(u.storedBytes)}`;
-              const model = `All time: ${num.format(u.llmCalls)} model calls, ${Math.round(u.llmInputTokens / 1000)}k tokens in, ${Math.round(u.llmOutputTokens / 1000)}k out`;
-              const active = r.lastActive ? ago(r.lastActive) : "never";
-              const stateLabel = r.status === "pending" ? "Approve" : r.status === "suspended" ? "Reinstate" : "Suspend";
-              const stateOff = busy || (self && r.status === "active");
-              const stateWhy = self && r.status === "active" ? "You cannot suspend your own account" : undefined;
-              const stateRun = () => {
-                if (r.status === "pending") approve.mutate({ id: r.id });
-                else if (r.status === "suspended") unban.mutate({ id: r.id });
-                else {
-                  setBanReason("");
-                  setConfirm({ kind: "ban", row: r });
-                }
-              };
-              return (
-                <ListRow key={r.id} tall active={checked}>
-                  <ListCell className="relative !p-0">
-                    <label
-                      className={`absolute inset-0 flex cursor-pointer items-center justify-center ${checked ? "opacity-100" : "opacity-0"} ${LIST_REVEAL_ROW}`}
-                    >
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 accent-[var(--acc)]"
-                        checked={checked}
-                        disabled={allMatching || bulk.isPending}
-                        onChange={() => toggle(r.id)}
-                        aria-label={`Select ${r.email}`}
-                      />
-                    </label>
-                  </ListCell>
-                  <ListCell title={model}>
-                    <div className="flex items-center gap-2">
-                      <span className={`min-w-0 ${LIST_TITLE}`}>{r.name || r.email}</span>
-                      {r.role === "admin" && <span className="chip shrink-0 bg-acc-soft text-acc-text">admin</span>}
-                      {r.mustChangePassword && (
-                        <span
-                          className="chip shrink-0 bg-warn-soft text-warn"
-                          title="reelsaw set-password --must-change: they pick a new password at next sign-in"
-                        >
-                          must change password
-                        </span>
-                      )}
-                      {r.plan && r.plan !== "free" && <span className="chip shrink-0 bg-sunk text-ink2">{r.plan}</span>}
-                      {r.status === "pending" && r.heldBy && (
-                        // the kind only ("held · email"), so the name keeps its room; the whole rule is in the title.
-                        // A click lists everyone that rule held.
-                        <button
-                          type="button"
-                          className="chip shrink-0 bg-sunk text-ink2 hover:text-ink"
-                          onClick={() => setHeldBy(r.heldBy ?? "")}
-                          title={`Held for approval by the sign-up rule ${r.heldBy}. They only see “waiting for approval”. Click to list everyone it held.`}
-                        >
-                          held · {r.heldBy.split(" ")[0]}
-                        </button>
-                      )}
-                      {/* a click lists everyone flagged for the same reason */}
-                      {r.flags.filter(isAbuseFlag).map((f) => (
-                        <button
-                          type="button"
-                          key={f}
-                          className="chip shrink-0 bg-warn-soft text-warn hover:brightness-110"
-                          onClick={() => setFlag(f)}
-                          title={`${sentence(FLAG_HELP[f])}${r.signupIp ? ` · signed up from ${r.signupIp}` : ""}. Click to list everyone flagged for this.`}
-                        >
-                          ⚑ {FLAG_LABEL[f]}
-                        </button>
-                      ))}
-                      {self && <span className="shrink-0 text-xs text-ink3">(you)</span>}
-                    </div>
-                    {/* the address truncates; whether it is verified always shows */}
-                    <div className="flex min-w-0 items-baseline gap-1.5 text-xs text-ink3">
-                      <span className="min-w-0 truncate">{r.email}</span>
-                      <span
-                        className={`shrink-0 ${r.emailVerified ? "text-ok" : "text-warn"}`}
-                        title={r.emailVerified ? "They confirmed this address" : "They have not confirmed this address yet"}
-                      >
-                        {r.emailVerified ? "✓ verified" : "◇ unverified"}
-                      </span>
-                    </div>
-                    <div className={`${LIST_SUB} min-[1040px]:hidden`}>
-                      <span className={st.tone}>
-                        {st.glyph} {st.word}
-                      </span>{" "}
-                      · {line} · active {active}
-                    </div>
-                  </ListCell>
-                  <ListCell full className={`text-xs ${st.tone}`} title={r.banReason ?? undefined}>
-                    {st.glyph} {st.word}
-                  </ListCell>
-                  <ListCell full variant="num">
-                    {num.format(u.projects)}
-                  </ListCell>
-                  <ListCell full variant="num">
-                    {num.format(u.sourceMinutes)}
-                  </ListCell>
-                  <ListCell full variant="num">
-                    {num.format(u.clipsRendered)}
-                  </ListCell>
-                  <ListCell full variant="num">
-                    {formatBytes(u.storedBytes)}
-                  </ListCell>
-                  <ListCell full variant="muted">
-                    {active}
-                  </ListCell>
-                  <ListCell variant="actions">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button
-                        className={`${r.status === "pending" ? "btn-primary" : "btn-ghost"} w-[5.5rem] ${LIST_ACTION}`}
-                        disabled={stateOff}
-                        title={stateWhy}
-                        onClick={stateRun}
-                      >
-                        {stateLabel}
-                      </button>
-                      <button className={`btn-ghost w-[4.25rem] ${LIST_ACTION}`} onClick={() => setLimitsFor(r)}>
-                        Limits
-                      </button>
-                      <DropdownMenu.Root>
-                        <DropdownMenu.Trigger asChild>
-                          <MoreButton aria-label={`More actions for ${r.email}`} />
-                        </DropdownMenu.Trigger>
-                        <DropdownMenu.Portal>
-                          <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className={LIST_MENU}>
-                            <DropdownMenu.Item className={LIST_MENU_ITEM_FOLDED} disabled={stateOff} onSelect={stateRun}>
-                              {stateLabel}
-                              {stateWhy && <span className="menu-hint">not your own</span>}
-                            </DropdownMenu.Item>
-                            <DropdownMenu.Item className={LIST_MENU_ITEM_FOLDED} onSelect={() => setLimitsFor(r)}>
-                              Limits…
-                            </DropdownMenu.Item>
-                            {r.status === "active" && (
-                              <DropdownMenu.Item
-                                className="menu-item"
-                                disabled={busy || self || r.role === "admin"}
-                                onSelect={() => setConfirm({ kind: "hold", row: r })}
-                              >
-                                Require approval…
-                                {(self || r.role === "admin") && <span className="menu-hint">{self ? "not your own" : "not an admin"}</span>}
-                              </DropdownMenu.Item>
-                            )}
-                            {r.status === "pending" && (
-                              <DropdownMenu.Item
-                                className="menu-item"
-                                disabled={busy}
-                                onSelect={() => {
-                                  setBanReason("");
-                                  setConfirm({ kind: "ban", row: r });
-                                }}
-                              >
-                                Suspend
-                              </DropdownMenu.Item>
-                            )}
-                            <DropdownMenu.Item className="menu-item" disabled={busy} onSelect={() => window.setTimeout(() => setRuleFor(r), 0)}>
-                              Add sign-up rule…
-                            </DropdownMenu.Item>
-                            <DropdownMenu.Item className="menu-item" disabled={busy || self} onSelect={() => setConfirm({ kind: "role", row: r })}>
-                              {r.role === "admin" ? "Remove admin…" : "Make admin…"}
-                              {self && <span className="menu-hint">not your own</span>}
-                            </DropdownMenu.Item>
-                            <DropdownMenu.Item className="menu-item-danger" disabled={busy || self} onSelect={() => setConfirm({ kind: "delete", row: r })}>
-                              Delete account…
-                              {self && <span className="menu-hint">not your own</span>}
-                            </DropdownMenu.Item>
-                          </DropdownMenu.Content>
-                        </DropdownMenu.Portal>
-                      </DropdownMenu.Root>
-                    </div>
-                  </ListCell>
-                </ListRow>
-              );
-            })}
+          <ListTable
+            caption={groupBy ? "Accounts grouped by abuse flag, with all-time usage" : "Accounts, with all-time usage"}
+            columns={columns}
+            loading={pendingList}
+            loadingLabel="Loading accounts…"
+          >
+            {groupBy ? (
+              groups.isPending ? (
+                Array.from({ length: LIST_SKELETON_ROWS }, (_, i) => skeletonRow(i))
+              ) : (
+                sections.map((g) => (
+                  <UserGroupSection
+                    key={g.key}
+                    section={g}
+                    filter={{ ...filter, group: { by: groupBy, key: g.key } }}
+                    open={!closed.has(g.key)}
+                    onToggle={() =>
+                      setClosed((cur) => {
+                        const next = new Set(cur);
+                        if (!next.delete(g.key)) next.add(g.key);
+                        return next;
+                      })
+                    }
+                    onRows={onGroupRows}
+                    sortRows={sortRows}
+                    renderRow={renderRow}
+                    skeletonRow={skeletonRow}
+                    colCount={{ folded: columns.filter((c) => !c.full).length, full: columns.length }}
+                    pageSize={q ? 100 : PAGE}
+                    isChecked={isChecked}
+                    allOfHere={allOf?.key === g.key}
+                    allOfOther={allOf !== null && allOf.key !== g.key}
+                    onSetMany={setMany}
+                    onSelectAll={() => setAllOf({ key: g.key })}
+                    disabled={bulk.isPending}
+                  />
+                ))
+              )
+            ) : (
+              <>
+                {list.isPending && Array.from({ length: LIST_SKELETON_ROWS }, (_, i) => skeletonRow(i))}
+                {rows.map((r) => renderRow(r, r.id))}
+              </>
+            )}
           </ListTable>
           <ListFooter
             action={
+              !groupBy &&
               list.hasNextPage && (
                 <button type="button" className="btn-ghost h-9 min-w-[8rem]" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
                   {list.isFetchingNextPage ? "Loading…" : `Load ${num.format(Math.min(PAGE, total - rows.length))} more`}
@@ -608,8 +736,10 @@ export function AdminUsersPage() {
               )
             }
           >
-            {list.isPending ? (
+            {pendingList ? (
               <Skeleton className="h-3 w-40" />
+            ) : groupBy ? (
+              `${accounts(total)} in ${num.format(sections.length)} section${sections.length === 1 ? "" : "s"}${sections.length > 1 ? " · an account with two flags is in both" : ""}`
             ) : (
               `${q && total > rows.length ? "Showing the best " : "Showing "}${num.format(rows.length)} of ${accounts(total)}`
             )}
@@ -620,7 +750,7 @@ export function AdminUsersPage() {
               count={selCount}
               onClear={() => {
                 setSel([]);
-                setAllMatching(false);
+                setAllOf(null);
               }}
             >
               {progress ? (
@@ -631,7 +761,7 @@ export function AdminUsersPage() {
                 allOn &&
                 !allMatching &&
                 total > rows.length && (
-                  <button type="button" className="btn-ghost h-8 px-2 text-xs" onClick={() => setAllMatching(true)}>
+                  <button type="button" className="btn-ghost h-8 px-2 text-xs" onClick={() => setAllOf({ key: null })}>
                     Select all {num.format(total)}
                   </button>
                 )
@@ -742,7 +872,7 @@ export function AdminUsersPage() {
         title={`Delete ${scope("delete")} forever?`}
         body={
           allMatching
-            ? `Every account matching the filters (${num.format(total)}), with all their projects, clips and files, is deleted permanently. Your own account and the last admin are left out. This cannot be undone.`
+            ? `${sentence(allLabel)} (${num.format(allTotal)}), with all their projects, clips and files, is deleted permanently. Your own account and the last admin are left out. This cannot be undone.`
             : `${accounts(targets("delete").length)}, with ${num.format(targets("delete").reduce((n, r) => n + r.projects, 0))} projects and all their clips and files, are deleted permanently. This cannot be undone.`
         }
         confirm="Delete accounts forever"
@@ -820,6 +950,160 @@ export function AdminUsersPage() {
         }}
       />
     </ListPage>
+  );
+}
+
+/**
+ * One section of the grouped list (group by flag): a header row with the reason, how many accounts it holds over
+ * the whole filter, a fold toggle and a checkbox for its rows, then its rows, paged on their own with the section's
+ * filter (the server's `group`), so "Load more" and "Select all 120" mean this section only. A folded section
+ * loads nothing until opened. Rows render through the page's `renderRow`, so a grouped row is the flat row.
+ */
+function UserGroupSection({
+  section,
+  filter,
+  open,
+  onToggle,
+  onRows,
+  sortRows,
+  renderRow,
+  skeletonRow,
+  colCount,
+  pageSize,
+  isChecked,
+  allOfHere,
+  allOfOther,
+  onSetMany,
+  onSelectAll,
+  disabled,
+}: {
+  section: { key: FlagGroup; label: string; help: string; total: number };
+  filter: UserFilterInput;
+  open: boolean;
+  onToggle: () => void;
+  onRows: (key: FlagGroup, rows: Row[] | null) => void;
+  sortRows: (rows: Row[]) => Row[];
+  renderRow: (r: Row, key: string) => ReactNode;
+  skeletonRow: (i: number, key?: string | number) => ReactNode;
+  /** visible columns below and above the fold width: a spanning cell must not span hidden ones */
+  colCount: { folded: number; full: number };
+  pageSize: number;
+  isChecked: (r: Row) => boolean;
+  /** "every match" is this whole section */
+  allOfHere: boolean;
+  /** "every match" is the whole list or another section: the header box reads its rows, a click starts over */
+  allOfOther: boolean;
+  onSetMany: (ids: string[], on: boolean) => void;
+  onSelectAll: () => void;
+  disabled: boolean;
+}) {
+  const trpc = useTRPC();
+  const list = useInfiniteQuery(
+    trpc.admin.users.list.infiniteQueryOptions(
+      { ...filter, limit: PAGE },
+      { getNextPageParam: (last) => last.nextCursor ?? undefined, placeholderData: keepPreviousData, enabled: open },
+    ),
+  );
+  const loaded = useMemo(() => (list.data?.pages.flatMap((pg) => pg.items) ?? []) as Row[], [list.data]);
+  const { key, label, help, total } = section;
+  useEffect(() => onRows(key, loaded), [key, loaded, onRows]);
+  useEffect(() => () => onRows(key, null), [key, onRows]);
+  const rows = useMemo(() => sortRows(loaded), [loaded, sortRows]);
+  const ids = rows.map((r) => r.id);
+  const on = allOfHere || (ids.length > 0 && rows.every(isChecked));
+  const some = !on && rows.some(isChecked);
+  const flagged = key !== "none";
+  const headCell = "sticky top-9 z-[5] h-10 border-t border-line bg-sunk align-middle";
+  // as many placeholders as the section will show, so the rows land where the skeleton was
+  const expected = Math.min(total, pageSize);
+  return (
+    <>
+      <tr>
+        <td className={`${headCell} relative !p-0`}>
+          <label className="absolute inset-0 flex cursor-pointer items-center justify-center">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-[var(--acc)]"
+              checked={on}
+              ref={(el) => {
+                if (el) el.indeterminate = some;
+              }}
+              disabled={!open || !ids.length || disabled}
+              onChange={() => onSetMany(ids, allOfOther ? true : !on)}
+              aria-label={on ? `Clear the accounts in ${label}` : `Select the loaded accounts in ${label}`}
+            />
+          </label>
+        </td>
+        <SpanCells cols={colCount} minus={1} className={`${headCell} px-3`}>
+          <div className="flex min-w-0 items-center gap-2">
+            <button type="button" className="flex min-w-0 items-center gap-2 text-left" aria-expanded={open} onClick={onToggle} title={sentence(help)}>
+              <ChevronRight aria-hidden className={`h-3.5 w-3.5 shrink-0 text-ink3 transition-transform ${open ? "rotate-90" : ""}`} />
+              <span className={`chip shrink-0 ${flagged ? "bg-warn-soft text-warn" : "bg-panel text-ink2"}`}>
+                {flagged ? "⚑ " : ""}
+                {label}
+              </span>
+              <span className="shrink-0 text-xs tabular-nums text-ink2">{accounts(total)}</span>
+              <span className="hidden min-w-0 truncate text-xs text-ink3 sm:inline">{help}</span>
+            </button>
+            <span className="ml-auto shrink-0 text-xs">
+              {allOfHere ? (
+                <span className="text-ink2">All {num.format(total)} selected</span>
+              ) : (
+                on &&
+                total > rows.length && (
+                  <button type="button" className="btn-ghost h-7 px-2 text-xs" disabled={disabled} onClick={onSelectAll}>
+                    Select all {num.format(total)}
+                  </button>
+                )
+              )}
+            </span>
+          </div>
+        </SpanCells>
+      </tr>
+      {open && list.isPending && Array.from({ length: expected }, (_, i) => skeletonRow(i, `${key}-sk-${i}`))}
+      {open && rows.map((r) => renderRow(r, `${key}-${r.id}`))}
+      {open && list.hasNextPage && (
+        <tr>
+          <SpanCells cols={colCount} className="h-11 border-t border-line px-3 text-xs text-ink3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="tabular-nums">
+                {num.format(rows.length)} of {num.format(total)} in {label}
+              </span>
+              <button type="button" className="btn-ghost h-8 min-w-[8rem]" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
+                {list.isFetchingNextPage ? "Loading…" : `Load ${num.format(Math.min(PAGE, total - rows.length))} more`}
+              </button>
+            </div>
+          </SpanCells>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/**
+ * A cell across the rest of a row. The list hides its `full` columns below 1040px, and a colSpan wider than the
+ * visible columns adds phantom columns that squeeze the others, so there is one cell per layout.
+ */
+function SpanCells({
+  cols,
+  minus = 0,
+  className,
+  children,
+}: {
+  cols: { folded: number; full: number };
+  minus?: number;
+  className: string;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <td colSpan={cols.folded - minus} className={`${className} min-[1040px]:hidden`}>
+        {children}
+      </td>
+      <td colSpan={cols.full - minus} className={`${className} hidden min-[1040px]:table-cell`}>
+        {children}
+      </td>
+    </>
   );
 }
 

@@ -165,3 +165,21 @@ export const FLAG_HELP: Record<AbuseFlag, string> = {
   signup_burst: "five or more accounts from the same address within one hour",
   disposable_email: "the email domain is a known temporary-address service",
 };
+
+/**
+ * How the admin's account list can be grouped (Users page "Group", `list_users` groupBy, `reelsaw users --group`).
+ * Grouping partitions the same filtered list into sections, each with its own count, paging and "select all";
+ * it never narrows it. `flag`: one section per abuse reason, then the accounts with none. An account flagged for
+ * two reasons is in both sections (like a multi-select field grouped in a tracker).
+ */
+export const USER_GROUP_BY = ["flag"] as const;
+export type UserGroupBy = (typeof USER_GROUP_BY)[number];
+export const isUserGroupBy = (v: unknown): v is UserGroupBy => USER_GROUP_BY.some((g) => g === v);
+/** The sections of group-by-flag, in display order; `none` = not flagged, last. */
+export const FLAG_GROUPS = [...ABUSE_FLAGS, "none"] as const;
+export type FlagGroup = (typeof FLAG_GROUPS)[number];
+export const isFlagGroup = (v: unknown): v is FlagGroup => FLAG_GROUPS.some((g) => g === v);
+export const flagGroupLabel = (k: FlagGroup): string => (k === "none" ? "not flagged" : FLAG_LABEL[k]);
+export const flagGroupHelp = (k: FlagGroup): string => (k === "none" ? "no abuse flag from the hourly pass" : FLAG_HELP[k]);
+/** Whether an account (its `flags`) is in a group-by-flag section: the same rule as the server's filter. */
+export const inFlagGroup = (flags: readonly string[], k: FlagGroup): boolean => (k === "none" ? flags.length === 0 : flags.includes(k));

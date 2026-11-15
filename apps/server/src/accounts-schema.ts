@@ -4,7 +4,7 @@
  * stdio bridge) can import it without the services behind it.
  */
 import { z } from "zod";
-import { ABUSE_FLAGS } from "@reelsaw/shared";
+import { ABUSE_FLAGS, FLAG_GROUPS, USER_GROUP_BY } from "@reelsaw/shared";
 
 export const USER_STATUSES = ["pending", "active", "suspended"] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
@@ -28,12 +28,40 @@ export const userFilterSchema = z.object({
     .describe(
       'Only accounts a sign-up rule held for approval, by the rule as list_signup_rules shows it (kind and pattern: "ip 203.0.113.0/24"), whatever their status now',
     ),
+  group: z
+    .object({
+      by: z.enum(USER_GROUP_BY).describe("flag: the sections of list_users groupBy flag"),
+      key: z.enum(FLAG_GROUPS).describe("The section: an abuse flag, or none for the accounts with no flag"),
+    })
+    .optional()
+    .describe(
+      "Only the accounts in one section of list_users groupBy, on top of the other fields: by flag, key = shared_ip, signup_burst, disposable_email or none (not flagged). Each group list_users returns carries its own filter with this set",
+    ),
 });
 export type UserFilter = z.infer<typeof userFilterSchema>;
 
 export const userListInput = userFilterSchema.extend({
   cursor: z.string().max(300).optional().describe("nextCursor from the previous page (ignored with q: a search returns its best 100 in one page)"),
   limit: z.number().int().min(1).max(100).default(50).describe("Page size (1-100, default 50)"),
+});
+
+/**
+ * The filtered list split into sections (accounts-list.ts `userGroups`): each with its count and the filter that
+ * pages or acts on it. `limit` 0 = counts only (the Users page loads each open section itself).
+ */
+export const userGroupsInput = userFilterSchema.extend({
+  by: z.enum(USER_GROUP_BY).describe("flag = one section per abuse reason (shared_ip, signup_burst, disposable_email), then none (not flagged)"),
+  limit: z.number().int().min(0).max(100).default(20).describe("Accounts listed per section (0-100, default 20; 0 = counts only)"),
+});
+
+/** list_users over MCP: the list, or with groupBy the same list in sections (one tool, one filter). */
+export const userListToolInput = userListInput.extend({
+  groupBy: z
+    .enum(USER_GROUP_BY)
+    .optional()
+    .describe(
+      "Split the matching accounts into sections instead of one page: flag = one per abuse reason, then none (not flagged); an account with two flags is in both. Returns { by, total, groups: [{ key, label, help, total, filter, items, nextCursor }] }: limit accounts per section; pass a section's filter fields to list_users with its nextCursor for more, or its filter to manage_users to act on that section",
+    ),
 });
 
 /** What a bulk action does to each account; each one is the single-account transition in accounts.ts. */

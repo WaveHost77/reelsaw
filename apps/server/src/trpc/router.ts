@@ -70,8 +70,8 @@ import {
 import { peekUrlMeta } from "../projects/peek.js";
 import { deletedItemRefSchema, listDeleted, purgeDeleted, restoreDeleted } from "../deleted.js";
 import { USER_ROLES } from "../db/schema.js";
-import { flagCounts, listUsers } from "../accounts-list.js";
-import { bulkUsersInput, userListInput } from "../accounts-schema.js";
+import { flagCounts, listUsers, userGroups } from "../accounts-list.js";
+import { bulkUsersInput, userGroupsInput, userListInput } from "../accounts-schema.js";
 import { listSignupRulesInput, manageSignupRulesInput } from "../signup-rules-schema.js";
 import { changeSignupRules, listSignupRules } from "../signup-rules.js";
 import { fleetPaused, listWorkers } from "../ops/workers.js";
@@ -995,6 +995,8 @@ const restRouter = router({
     users: router({
       /** Keyset page of accounts with their all-time usage; search and filters in SQL (accounts-list.ts). */
       list: adminProcedure.input(userListInput.optional()).query(({ ctx, input }) => listUsers(ctx.svc, input)),
+      /** The same filtered list in sections (group by flag): counts, each section's filter, its first page unless limit 0. */
+      groups: adminProcedure.input(userGroupsInput).query(({ ctx, input }) => userGroups(ctx.svc, input)),
       /**
        * One action over many accounts (the selection bar, `manage_users`, `reelsaw users-bulk`): the ids, or a
        * page of every account matching the filter. Each account is its own transition and event; refusals
