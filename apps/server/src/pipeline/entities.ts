@@ -27,9 +27,39 @@ const COMMON = new Set(
   ),
 );
 
-export function isCommonWord(w: string) {
-  const n = norm(w);
-  return STOP.has(n) || COMMON.has(n) || COMMON.has(n.replace(/s$/, "")) || COMMON.has(n.replace(/(ed|ing)$/, ""));
+/** Spoken forms transcribers write the way people say them. None is a name. */
+const CASUAL = new Set("gonna wanna gotta kinda sorta lemme gimme dunno ain't y'all yeah yep yup nope okay ok alright cool sorry".split(" "));
+
+/** "don't" is "do", "you're" is "you", "can't" is "can". A name's possessive ("Ludwig's") stays a name. */
+const CONTRACTION = /^(.+?)(n't|'re|'s|'ll|'ve|'d|'m)$/;
+const NT_STEM: Record<string, string> = { ca: "can", wo: "will", sha: "shall" };
+
+const known = (n: string) => STOP.has(n) || COMMON.has(n);
+
+/** Regular inflections back to a listed word: "noticing" → notice, "running" → run, "stories" → story, "shortly" → short. */
+function stems(n: string): string[] {
+  const out = [n.replace(/es$/, ""), n.replace(/ies$/, "y"), n.replace(/ied$/, "y"), n.replace(/ly$/, "")];
+  const base = /^(.{2,}?)(ed|ing)$/.exec(n)?.[1];
+  if (base) out.push(base, `${base}e`, base.replace(/(.)\1$/, "$1"));
+  return out;
+}
+
+/**
+ * Everyday English, including the contractions, casual spellings and inflections a transcript is full of. Anything
+ * this misses can be replaced by an entity fix without review, so it errs towards "common".
+ */
+export function isCommonWord(w: string): boolean {
+  const lower = w
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[’‘`]/g, "'")
+    .replace(/^[^\p{L}\p{N}']+|[^\p{L}\p{N}']+$/gu, "");
+  if (CASUAL.has(lower)) return true;
+  const c = CONTRACTION.exec(lower);
+  if (c) return isCommonWord(NT_STEM[c[1]!] ?? c[1]!);
+  const n = norm(lower);
+  if (!n) return false;
+  return known(n) || COMMON.has(n.replace(/s$/, "")) || stems(n).some((s) => s !== n && known(s));
 }
 
 export interface SourceMetaLike {
