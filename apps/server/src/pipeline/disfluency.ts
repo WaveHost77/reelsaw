@@ -103,7 +103,7 @@ const EMPHATIC = new Set(
   ),
 );
 /**
- * Words that cannot end a clause (nominative pronouns, conjunctions, articles, most prepositions).
+ * Closed-class words that cannot end a clause (nominative pronouns, conjunctions, articles, most prepositions).
  * "I, I think" / "and, and this" can only be a stutter; "show you, you don't" can be two clauses.
  */
 const NEVER_CLAUSE_FINAL = new Set(
