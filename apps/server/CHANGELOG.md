@@ -1,5 +1,11 @@
 # @reelsaw/server
 
+## 0.39.1
+
+### Patch Changes
+
+- [#280](https://github.com/osbytes/reelsaw/pull/280) [`6d72e88`](https://github.com/osbytes/reelsaw/commit/6d72e88cf4ee68d0758db63279b60e65547341ee) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Name fixes no longer change everyday words in captions on their own. Everyday words now come from a standard English dictionary list (SCOWL), so contractions ("don't", "you're"), casual spellings ("gonna") and word forms like "noticing" or "heard" count as everyday words, so a suggested name in their place waits for your review instead of being applied.
+
 ## 0.39.0
 
 ### Minor Changes
