@@ -825,7 +825,7 @@ export function DeleteAssetDialog({
 }: {
   asset: Pick<LibraryAsset, "id" | "name" | "usedBy" | "usedByTemplates"> | null;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: () => Promise<unknown>;
 }) {
   const { hint } = useRestoreWindow("asset", !!asset);
   const used = asset ? asset.usedBy > 0 || asset.usedByTemplates > 0 : false;

@@ -57,8 +57,21 @@ export function Notice({ tone, glyph, children, className = "" }: { tone: Tone; 
   );
 }
 
-export function Spinner() {
-  return <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-line2 border-t-acc" />;
+export function Spinner({ className = "" }: { className?: string }) {
+  return <span aria-hidden className={`inline-block h-3 w-3 animate-spin rounded-full border-2 border-line2 border-t-acc ${className}`} />;
+}
+
+/**
+ * A button label that turns into a spinner while its work runs, keeping the label's width (the label goes invisible,
+ * the spinner sits over it), so nothing moves. Put it inside the button and set the button's `disabled` / `aria-busy`.
+ */
+export function Pending({ busy, children }: { busy: boolean; children: ReactNode }) {
+  return (
+    <span className="relative inline-grid place-items-center">
+      <span className={`col-start-1 row-start-1 inline-flex items-center gap-[inherit] ${busy ? "invisible" : ""}`}>{children}</span>
+      {busy && <Spinner className="col-start-1 row-start-1" />}
+    </span>
+  );
 }
 
 /** Placeholder block for content that is still loading. Size it with the same classes as the real thing. */
@@ -165,8 +178,10 @@ export function Modal({
 
 /** Cancel / confirm over a one-paragraph body; `children` go under it (e.g. a list of what still uses the item). */
 /**
- * A yes/no question before an action. When `onConfirm` returns a promise the dialog stays open with
- * the button busy until it settles, and a failure shows here instead of vanishing with the dialog.
+ * A yes/no question before an action. `onConfirm` returns the work's promise (a mutation's `mutateAsync`, not
+ * `mutate`): the dialog stays open with a spinner on the button until it settles, and a failure shows here instead of
+ * vanishing with the dialog (so don't also toast it). The type makes fire-and-forget impossible ("Work in flight shows",
+ * docs/PRINCIPLES.md); a confirm with nothing to wait on returns `Promise.resolve()`.
  */
 export function ConfirmDialog({
   open,
@@ -185,7 +200,7 @@ export function ConfirmDialog({
   body: ReactNode;
   confirm: string;
   danger?: boolean;
-  onConfirm: () => void | Promise<unknown>;
+  onConfirm: () => Promise<unknown>;
   children?: ReactNode;
   width?: number;
 }) {
@@ -195,12 +210,10 @@ export function ConfirmDialog({
     if (open) setError(null);
   }, [open]);
   const run = async () => {
-    const r = onConfirm();
-    if (!(r instanceof Promise)) return onOpenChange(false);
     setBusy(true);
     setError(null);
     try {
-      await r;
+      await onConfirm();
       onOpenChange(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
@@ -224,7 +237,7 @@ export function ConfirmDialog({
           Cancel
         </button>
         <button className={danger ? "btn-danger-solid" : "btn-ink"} disabled={busy} aria-busy={busy} onClick={() => void run()}>
-          {confirm}
+          <Pending busy={busy}>{confirm}</Pending>
         </button>
       </div>
     </Modal>

@@ -280,10 +280,7 @@ export function SignupRulesSection() {
             : "Sign-ups it held follow the sign-up mode again. Accounts already waiting for approval stay waiting."
         }
         confirm="Remove rule"
-        onConfirm={() => {
-          if (removing) remove(removing);
-          setRemoving(null);
-        }}
+        onConfirm={() => (removing ? change.mutateAsync({ remove: [removing.id] }) : Promise.resolve())}
       />
     </section>
   );

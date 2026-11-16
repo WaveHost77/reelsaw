@@ -1,3 +1,4 @@
+import { deleteProjects, projectIdsInput, rerenderProjects, retryProjects } from "../projects/bulk.js";
 import { z } from "zod";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
@@ -1510,6 +1511,21 @@ const restRouter = router({
     delete: protectedProcedure
       .input(z.object({ id: z.string(), forgetDecisions: z.boolean().default(false) }))
       .mutation(({ ctx, input }) => deleteOwnedProject(ctx.svc, { id: ctx.user.id, admin: false }, input.id, { forgetDecisions: input.forgetDecisions })),
+
+    /** The Projects selection bar: delete several projects (each restorable like one). Per-project results; one failure does not stop the rest. */
+    deleteMany: protectedProcedure
+      .input(z.object({ ids: projectIdsInput, forgetDecisions: z.boolean().default(false) }))
+      .mutation(({ ctx, input }) => deleteProjects(ctx.svc, { id: ctx.user.id, admin: false }, input.ids, { forgetDecisions: input.forgetDecisions })),
+
+    /** The Projects selection bar: resume the failed projects among `ids` where each stopped; the others are skipped. */
+    retryMany: protectedProcedure
+      .input(z.object({ ids: projectIdsInput }))
+      .mutation(({ ctx, input }) => retryProjects(ctx.svc, { id: ctx.user.id, admin: false }, input.ids)),
+
+    /** The Projects selection bar: re-render every finished or failed clip of several projects. */
+    rerenderMany: protectedProcedure
+      .input(z.object({ ids: projectIdsInput }))
+      .mutation(({ ctx, input }) => rerenderProjects(ctx.svc, { id: ctx.user.id, admin: false }, input.ids)),
 
     /** Undo a delete (the owner, or an admin for anyone's project). */
     restore: protectedProcedure.input(z.object({ id: z.string() })).mutation(({ ctx, input }) => restoreProject(ctx.svc, actorOf(ctx.user), input.id)),

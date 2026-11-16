@@ -319,7 +319,7 @@ export function DeletedPage() {
             )}
           </ListFooter>
           {selected.length > 0 && (
-            <SelectionBar label="Selected deletions" count={selected.length} onClear={() => setSel([])}>
+            <SelectionBar label="Selected deletions" count={selected.length} busy={busy} onClear={() => setSel([])}>
               <button type="button" className="btn-ghost" disabled={busy} onClick={() => onRestore(selected)}>
                 Restore
               </button>
@@ -387,27 +387,26 @@ export function DeletedPage() {
         danger
         onConfirm={() => {
           const rows = pending;
-          if (!rows?.length) return;
-          purge.mutate(
-            { items: rows.map((r) => ({ kind: r.kind, id: r.id })), forgetDecisions: forgetDecisions && rows.some((r) => r.kind === "project") },
-            {
-              onSuccess: (r) => {
-                setPending(null);
-                setSel([]);
-                refresh();
-                toast(
-                  r.failed
-                    ? `Deleted ${r.purged} forever · ${r.failed} couldn’t be deleted${firstError(r.results)}`
-                    : r.storedBytes
-                      ? `Deleted forever · ${formatBytes(r.storedBytes)} freed`
-                      : rows.length === 1
-                        ? `Deleted “${rows[0]!.title}” forever`
-                        : `Deleted ${rows.length} items forever`,
-                );
-              },
-              onError: (err) => toast.error(err.message),
-            },
-          );
+          if (!rows?.length) return Promise.resolve();
+          return purge
+            .mutateAsync({
+              items: rows.map((r) => ({ kind: r.kind, id: r.id })),
+              forgetDecisions: forgetDecisions && rows.some((r) => r.kind === "project"),
+            })
+            .then((r) => {
+              setPending(null);
+              setSel([]);
+              refresh();
+              toast(
+                r.failed
+                  ? `Deleted ${r.purged} forever · ${r.failed} couldn’t be deleted${firstError(r.results)}`
+                  : r.storedBytes
+                    ? `Deleted forever · ${formatBytes(r.storedBytes)} freed`
+                    : rows.length === 1
+                      ? `Deleted “${rows[0]!.title}” forever`
+                      : `Deleted ${rows.length} items forever`,
+              );
+            });
         }}
       >
         {/* projects deleted with "forget" already go with their decisions; offer it only for the others */}

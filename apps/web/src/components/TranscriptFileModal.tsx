@@ -46,7 +46,7 @@ export function TranscriptFileModal({
   });
   const busy = imp.isPending;
   const base = `/api/projects/${projectId}/transcript`;
-  const runImport = () => file && imp.mutate({ file, language: language.trim() || undefined });
+  const runImport = () => (file ? imp.mutateAsync({ file, language: language.trim() || undefined }) : Promise.resolve());
 
   return (
     <Modal open={open} onOpenChange={(o) => !busy && onOpenChange(o)} title="Transcript files" width={460}>
@@ -114,7 +114,7 @@ export function TranscriptFileModal({
         <button
           className="btn-primary min-w-[96px] justify-center"
           disabled={!file || !canImport || busy}
-          onClick={() => (hasTranscript ? setConfirmReplace(true) : runImport())}
+          onClick={() => (hasTranscript ? setConfirmReplace(true) : void runImport().catch(() => {}))}
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-label="Importing" /> : "Import"}
         </button>
@@ -126,7 +126,7 @@ export function TranscriptFileModal({
         body={`“${file?.name ?? "This file"}” replaces the current transcript. Your accepted and rejected fixes, cuts and corrections are lost and cannot be brought back. The project then cleans it up and picks clips again.`}
         confirm="Replace transcript"
         danger
-        onConfirm={() => void runImport()}
+        onConfirm={runImport}
       />
     </Modal>
   );

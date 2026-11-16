@@ -268,17 +268,11 @@ export function TemplatesPage() {
         danger
         onConfirm={() => {
           const t = confirm;
-          if (!t) return;
-          remove.mutate(
-            { id: t.id },
-            {
-              onSuccess: (r) => {
-                if (r.clearedDefault) toast(`“${t.name}” is no longer the default for new projects`);
-                notifyDeleted({ items: [{ kind: "template", id: t.id, title: t.name }], restorable: restoreWindow.restorable });
-              },
-              onError: (err) => toast.error(err.message),
-            },
-          );
+          if (!t) return Promise.resolve();
+          return remove.mutateAsync({ id: t.id }).then((r) => {
+            if (r.clearedDefault) toast(`“${t.name}” is no longer the default for new projects`);
+            notifyDeleted({ items: [{ kind: "template", id: t.id, title: t.name }], restorable: restoreWindow.restorable });
+          });
         }}
       />
     </ListPage>

@@ -34,6 +34,7 @@ import { useSession } from "../lib/auth";
 import { useTheme } from "../lib/theme";
 import { setPendingBumperFiles, useUploads } from "../lib/uploads";
 import { useMe } from "../lib/account";
+import { pendingToast } from "../lib/pendingToast";
 import { toast } from "sonner";
 import { extractUrls, isOnlyUrls, linkKey, youtubeId } from "../lib/links";
 import { ago } from "../lib/time";
@@ -223,12 +224,10 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
     void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() });
   };
   /** Runs one mutation after the palette has closed; says in plain words how it went. */
+  /** The palette closes at once, so the work's toast shows "Working…" until it is done (pendingToast). */
   const act = (done: string, failed: string, fn: () => Promise<unknown>, projectId?: string) =>
     go(() => {
-      fn().then(
-        () => (refresh(projectId), toast(done)),
-        (err: Error) => toast.error(`${failed}: ${err.message.slice(0, 120)}`),
-      );
+      void pendingToast("Working…", fn, () => (refresh(projectId), done), failed);
     });
   /** Runs a mutation per id, one after another, and reports how many worked. */
   const each = async <T,>(rows: T[], fn: (row: T) => Promise<unknown>) => {
@@ -649,14 +648,18 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         label: `Retry all failed clips (${failedClipCount})`,
         hint: `across ${plural(counts?.failedClipProjects ?? 0, "project")}`,
         run: go(() => {
-          void each(counts?.failedClipIds ?? [], (id) => rerender.mutateAsync({ id })).then((r) => {
-            refresh();
-            toast(
-              r.failed
+          const ids = counts?.failedClipIds ?? [];
+          void pendingToast(
+            `Queuing ${plural(ids.length, "failed clip")}…`,
+            each(ids, (id) => rerender.mutateAsync({ id })),
+            (r) => {
+              refresh();
+              return r.failed
                 ? `Retrying ${plural(r.ok, "clip")} · ${r.failed} couldn’t be queued${r.firstError ? ` (${r.firstError.slice(0, 80)})` : ""}`
-                : `Retrying ${plural(r.ok, "failed clip")}`,
-            );
-          });
+                : `Retrying ${plural(r.ok, "failed clip")}`;
+            },
+            "Couldn’t retry",
+          );
         }),
       });
     if (failedProjectCount)
@@ -667,14 +670,18 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         label: `Resume failed projects (${failedProjectCount})`,
         hint: "each from the last stage that didn’t finish",
         run: go(() => {
-          void each(counts?.failedProjectIds ?? [], (id) => retry.mutateAsync({ id })).then((r) => {
-            refresh();
-            toast(
-              r.failed
+          const ids = counts?.failedProjectIds ?? [];
+          void pendingToast(
+            `Resuming ${plural(ids.length, "failed project")}…`,
+            each(ids, (id) => retry.mutateAsync({ id })),
+            (r) => {
+              refresh();
+              return r.failed
                 ? `Resumed ${plural(r.ok, "project")} · ${r.failed} couldn’t be resumed${r.firstError ? ` (${r.firstError.slice(0, 80)})` : ""}`
-                : `Resumed ${plural(r.ok, "failed project")}`,
-            );
-          });
+                : `Resumed ${plural(r.ok, "failed project")}`;
+            },
+            "Couldn’t resume",
+          );
         }),
       });
     if (!ql) {
@@ -996,10 +1003,7 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         confirm="Re-run refine"
         onConfirm={() => {
           const c = confirm!;
-          refine.mutateAsync({ id: c.id }).then(
-            () => (refresh(c.id), toast("Re-running refine")),
-            (err: Error) => toast.error(`Couldn’t re-run refine: ${err.message.slice(0, 120)}`),
-          );
+          return refine.mutateAsync({ id: c.id }).then(() => (refresh(c.id), toast("Re-running refine")));
         }}
       />
       <DeleteAssetDialog
@@ -1012,18 +1016,15 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         onConfirm={() => {
           const c = confirm!;
           const a = library?.find((x) => x.id === c.id);
-          removeAsset.mutateAsync({ id: c.id }).then(
-            () => {
-              refresh();
-              void qc.invalidateQueries({ queryKey: trpc.library.pathKey() });
-              notifyDeleted({
-                items: [{ kind: "asset", id: c.id, title: c.title }],
-                restorable: assetWindow.restorable,
-                canPurge: !a?.usedBy && !a?.usedByClips && !a?.usedByTemplates,
-              });
-            },
-            (err: Error) => toast.error(`Couldn’t delete: ${err.message.slice(0, 120)}`),
-          );
+          return removeAsset.mutateAsync({ id: c.id }).then(() => {
+            refresh();
+            void qc.invalidateQueries({ queryKey: trpc.library.pathKey() });
+            notifyDeleted({
+              items: [{ kind: "asset", id: c.id, title: c.title }],
+              restorable: assetWindow.restorable,
+              canPurge: !a?.usedBy && !a?.usedByClips && !a?.usedByTemplates,
+            });
+          });
         }}
       />
       <ConfirmDialog
@@ -1038,17 +1039,14 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         danger
         onConfirm={() => {
           const c = confirm!;
-          del.mutateAsync({ id: c.id, forgetDecisions }).then(
-            (r) => {
-              refresh();
-              notifyDeleted({
-                items: [{ kind: "project", id: c.id, title: c.title }],
-                restorable: r.restorable,
-                storedBytes: r.storedBytes,
-              });
-            },
-            (err: Error) => toast.error(`Couldn’t delete: ${err.message.slice(0, 120)}`),
-          );
+          return del.mutateAsync({ id: c.id, forgetDecisions }).then((r) => {
+            refresh();
+            notifyDeleted({
+              items: [{ kind: "project", id: c.id, title: c.title }],
+              restorable: r.restorable,
+              storedBytes: r.storedBytes,
+            });
+          });
         }}
       >
         <ForgetDecisionsOption checked={forgetDecisions} onChange={setForgetDecisions} later />
@@ -1062,17 +1060,14 @@ export function Palette({ open, onOpenChange, q, setQ }: { open: boolean; onOpen
         danger
         onConfirm={() => {
           const c = confirm!;
-          delClip.mutateAsync({ id: c.id }).then(
-            (r) => {
-              refresh();
-              notifyDeleted({
-                items: [{ kind: "clip", id: c.id, title: c.title }],
-                restorable: r.restorable,
-                storedBytes: r.storedBytes,
-              });
-            },
-            (err: Error) => toast.error(`Couldn’t delete: ${err.message.slice(0, 120)}`),
-          );
+          return delClip.mutateAsync({ id: c.id }).then((r) => {
+            refresh();
+            notifyDeleted({
+              items: [{ kind: "clip", id: c.id, title: c.title }],
+              restorable: r.restorable,
+              storedBytes: r.storedBytes,
+            });
+          });
         }}
       />
     </>

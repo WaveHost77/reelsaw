@@ -378,17 +378,12 @@ export function ClipCard({
         confirm="Delete clip"
         danger
         onConfirm={() =>
-          del.mutate(
-            { id: clip.id },
-            {
-              onSuccess: (r) =>
-                notifyDeleted({
-                  items: [{ kind: "clip", id: clip.id, title: clip.title || "Untitled clip" }],
-                  restorable: r.restorable,
-                  storedBytes: r.storedBytes,
-                }),
-              onError: (e) => toast.error(e.message),
-            },
+          del.mutateAsync({ id: clip.id }).then((r) =>
+            notifyDeleted({
+              items: [{ kind: "clip", id: clip.id, title: clip.title || "Untitled clip" }],
+              restorable: r.restorable,
+              storedBytes: r.storedBytes,
+            }),
           )
         }
       />

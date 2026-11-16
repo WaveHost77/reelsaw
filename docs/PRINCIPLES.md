@@ -385,6 +385,18 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   - Skeletons use the `Skeleton` primitive in `components/ui.tsx` (wrap a region in
     `SkeletonRegion` for the screen-reader "Loading…") and the same layout classes as the real rows,
     so the swap is a content change, not a layout change.
+- **Work in flight shows.** From the click until the server answers, the user can see that something is running
+  where they started it, and cannot start it twice. Group actions (a selection bar, "delete all", "retry all") most
+  of all: they take long enough to look broken otherwise.
+  - A confirm dialog waits for its work: `ConfirmDialog`'s `onConfirm` must return the promise (`mutateAsync`, never
+    `mutate`); the type enforces it. The dialog keeps a spinner on its button (`Pending`, which keeps the label's width)
+    and shows a failure inline instead of closing over it.
+  - A selection bar takes a required `busy` (the OR of every mutation it starts): its ✓ turns into a spinner in place
+    and its actions are disabled with the same flag.
+  - Work started from something that closes at once (a ⋯ menu item, a command palette row) goes through
+    `pendingToast` (`lib/pendingToast.ts`): a loading toast right away that becomes the result or the failure.
+  - A button that runs work itself is `disabled` + `aria-busy` while `isPending`, its label wrapped in `Pending`.
+  - Progress that has a count (chunked bulk work) says it ("120 of 400…") where the action was started.
 - **Server state is TanStack Query.** Reads are `useQuery` / `useInfiniteQuery` (see "Loading is
   not empty"). Writes are `useMutation`: tRPC via `trpc.x.y.mutationOptions()`, anything else
   (better-auth, a one-shot `fetch`) via `mutationFn`. Pending, error and result come from the hook

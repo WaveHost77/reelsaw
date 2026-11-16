@@ -76,9 +76,10 @@ export function DeletedToastConfirm() {
       confirm="Delete forever"
       danger
       onConfirm={() => {
-        if (!ask) return;
-        setAsking(null);
-        void ask.onPurge().then((r) => {
+        if (!ask) return Promise.resolve();
+        // the dialog stays open with its spinner until the purge settles; a failure shows in it (Cancel brings the toast back)
+        return ask.onPurge().then((r) => {
+          setAsking(null);
           const msg =
             r && typeof r === "object" && "message" in r && typeof r.message === "string"
               ? r.message
@@ -86,7 +87,7 @@ export function DeletedToastConfirm() {
                 ? `Deleted “${items[0]!.title}” forever`
                 : `Deleted ${items.length} items forever`;
           toast(msg);
-        }, failToast);
+        });
       }}
     />
   );

@@ -268,7 +268,7 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
         }
         confirm="Create admin key"
         danger
-        onConfirm={() => create.mutate({ name: name.trim(), admin: true })}
+        onConfirm={() => create.mutateAsync({ name: name.trim(), admin: true })}
       />
       <ConfirmDialog
         open={!!confirm}
@@ -277,10 +277,7 @@ export function ApiKeysSection({ mcpUrl }: { mcpUrl: string }) {
         body={<>Anything using “{confirm?.name ?? "this key"}” stops working immediately.</>}
         confirm="Revoke"
         danger
-        onConfirm={() => {
-          if (confirm) remove.mutate(confirm.id);
-          setConfirm(null);
-        }}
+        onConfirm={() => (confirm ? remove.mutateAsync(confirm.id) : Promise.resolve())}
       />
     </section>
   );

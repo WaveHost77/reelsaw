@@ -1,5 +1,5 @@
 import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { ChevronDown, Film, Images, Link2, Plus, Upload } from "lucide-react";
@@ -14,6 +14,9 @@ import { ago } from "../lib/time";
 import { useMe } from "../lib/account";
 import { summarizeError } from "../lib/errors";
 import { useLoadMoreSentinel } from "../lib/useLoadMore";
+import { readHash, writeHash } from "../lib/hash";
+import { useShortcut, useShortcuts } from "../lib/shortcuts";
+import { ProjectsBar } from "../components/ProjectsBar";
 
 const ACTIVE = new Set(["queued", "ingesting", "transcribing", "refining", "analyzing", "rendering"]);
 
@@ -154,6 +157,27 @@ export function ProjectsPage() {
   const remaining = Math.max(0, total - loaded.length);
   const more = useLoadMoreSentinel(() => void q.fetchNextPage(), !!q.hasNextPage && !q.isFetching);
 
+  // multi-select for the selection bar, like the clips list: kept in the hash (#sel=id1,id2) so it survives a reload and
+  // can be shared. Ids not loaded (yet) stay selected but are not acted on; ones gone from a fully loaded list drop out.
+  const [sel, setSel] = useState<string[]>(() => (readHash().get("sel") ?? "").split(",").filter(Boolean));
+  const listLoaded = !!q.data;
+  useEffect(() => {
+    if (!listLoaded || q.hasNextPage || q.isPlaceholderData) return;
+    const live = new Set(loaded.map((p) => p.id));
+    setSel((cur) => (cur.every((x) => live.has(x)) ? cur : cur.filter((x) => live.has(x))));
+  }, [listLoaded, loaded, q.hasNextPage, q.isPlaceholderData]);
+  useEffect(() => {
+    if (listLoaded) writeHash({ sel: sel.join(",") || null });
+  }, [sel, listLoaded]);
+  const selecting = sel.length > 0;
+  const selected = useMemo(() => projects.filter((p) => sel.includes(p.id)), [projects, sel]);
+  const toggle = (id: string) => setSel((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  useShortcuts("Projects", [["Clear the selection", "Esc"]]);
+  useShortcut("escape", () => setSel([]), { enabled: selecting, preventDefault: false });
+  const refreshAll = () => {
+    void qc.invalidateQueries({ queryKey: trpc.projects.pathKey() });
+  };
+
   return (
     <ScrollArea className="min-h-0 flex-1">
       <main className="mx-auto flex max-w-[1180px] flex-col gap-6 px-4 py-7 sm:px-6">
@@ -209,11 +233,30 @@ export function ProjectsPage() {
                 : p.clipCount
                   ? `${p.clipCount} clip${p.clipCount === 1 ? "" : "s"} · ${p.clipsDone} ready · ${ago(p.createdAt)}`
                   : `Added ${ago(p.createdAt)}`;
+            const checked = sel.includes(p.id);
             return (
               <div key={p.id} className="group relative">
+                {/* over the thumbnail's corner, not in the flow: the card looks the same with or without selection */}
+                <label
+                  className={`absolute left-2.5 top-2.5 z-20 grid h-7 w-7 cursor-pointer place-items-center rounded-[8px] bg-black/45 backdrop-blur-sm focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100 ${selecting ? "opacity-100" : "opacity-0"}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggle(p.id)}
+                    aria-label={`Select ${p.title}`}
+                    className="h-4 w-4 cursor-pointer accent-[var(--acc)]"
+                  />
+                </label>
                 <Link
                   to={`/p/${p.id}`}
-                  className="flex flex-col overflow-hidden rounded-[16px] border border-line bg-panel text-ink no-underline transition hover:border-line2 hover:shadow-pop"
+                  // while something is selected a plain click adds or removes the card (a modified click still opens it)
+                  onClick={(e) => {
+                    if (!selecting || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                    e.preventDefault();
+                    toggle(p.id);
+                  }}
+                  className={`flex flex-col overflow-hidden rounded-[16px] border bg-panel text-ink no-underline transition hover:shadow-pop ${checked ? "border-acc ring-1 ring-acc" : "border-line hover:border-line2"}`}
                 >
                   <div className="film relative aspect-video">
                     {(p.sourceThumbnailUrl ?? (p.clipThumbs.length ? null : p.thumbnailUrl)) && (
@@ -274,6 +317,16 @@ export function ProjectsPage() {
           })}
           {q.isFetchingNextPage && Array.from({ length: Math.min(remaining, PAGE) }, (_, i) => <CardSkeleton key={`next-${i}`} i={i} />)}
         </div>
+
+        {selected.length > 0 && (
+          <ProjectsBar
+            selected={selected}
+            total={projects.length}
+            onSelectAll={() => setSel((cur) => [...new Set([...cur, ...projects.map((p) => p.id)])])}
+            onClear={() => setSel([])}
+            onChanged={refreshAll}
+          />
+        )}
 
         {/* fixed-height footer: the button, or the count once everything is loaded, never moves the page */}
         {projects.length > 0 && (

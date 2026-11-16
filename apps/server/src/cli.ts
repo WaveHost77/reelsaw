@@ -10,6 +10,7 @@ import {
   isUserGroupBy,
   USER_GROUP_BY,
 } from "@reelsaw/shared";
+import { deleteProjects, rerenderProjects, retryProjects } from "./projects/bulk.js";
 import { emailPreferences, setEmailPreferences } from "./notify/preferences.js";
 import { describeRun, runsOfProject } from "./pipeline/runs.js";
 /**
@@ -70,6 +71,9 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   refine <projectId> [--steps entities,disfluency,scenes] [--vocabulary text]
  *                                           re-run refine steps on the existing transcript, then re-render (same as projects.refine and refine_project)
  *   delete-project <projectId> [--forget-decisions]   delete a project, restorable like a clip (same as projects.delete and delete_project); --forget-decisions forgets its decisions when it is purged
+ *   delete-projects <projectId…> [--forget-decisions]  delete several projects (same as the Projects selection bar, projects.deleteMany and delete_projects)
+ *   retry-projects <projectId…>             resume the failed ones of several projects (projects.retryMany and retry_projects); others are skipped
+ *   rerender-projects <projectId…>          re-render every finished or failed clip of several projects (projects.rerenderMany and rerender_projects)
  *   export <projectId> [clipId…] --out <file.zip>
  *                                           write the zip of rendered clips with YouTube / TikTok metadata; the same conditions as the Export button and
  *                                           export_project (every picked clip must belong to the project, at least one rendered)
@@ -790,6 +794,27 @@ ${usage}`);
     if (!pos[0]) throw new Error("usage: reelsaw delete-project <projectId> [--forget-decisions]");
     const r = await deleteOwnedProject(svc, null, pos[0], { forgetDecisions: args.includes("--forget-decisions") });
     console.log(r.changed ? r.message : `${pos[0]} was already deleted`);
+  },
+  /** Several projects at once: `reelsaw delete-projects <projectId…> [--forget-decisions]`. Same as projects.deleteMany and delete_projects. */
+  async "delete-projects"(svc) {
+    if (!pos.length) throw new Error("usage: reelsaw delete-projects <projectId…> [--forget-decisions]");
+    const r = await deleteProjects(svc, null, pos, { forgetDecisions: args.includes("--forget-decisions") });
+    console.log(`deleted ${r.deleted} project(s)${r.skipped ? `, ${r.skipped} already deleted` : ""}; reelsaw restore brings each back ${r.restorable}`);
+    for (const x of r.results) if (!x.ok) console.log(`  ${x.id}: ${x.error}`);
+  },
+  /** Resume the failed ones: `reelsaw retry-projects <projectId…>`. Same as projects.retryMany and retry_projects. */
+  async "retry-projects"(svc) {
+    if (!pos.length) throw new Error("usage: reelsaw retry-projects <projectId…>");
+    const r = await retryProjects(svc, null, pos);
+    console.log(`retried ${r.retried} project(s)${r.skipped ? `, ${r.skipped} not failed (left as they are)` : ""}`);
+    for (const x of r.results) if (!x.ok) console.log(`  ${x.id}: ${x.error}`);
+  },
+  /** Every finished or failed clip of several projects: `reelsaw rerender-projects <projectId…>`. Same as projects.rerenderMany and rerender_projects. */
+  async "rerender-projects"(svc) {
+    if (!pos.length) throw new Error("usage: reelsaw rerender-projects <projectId…>");
+    const r = await rerenderProjects(svc, null, pos);
+    console.log(`queued ${r.rerendered} clip(s)${r.skipped ? `, ${r.skipped} still preparing or rendering` : ""}`);
+    for (const x of r.results) if (!x.ok) console.log(`  ${x.id}: ${x.error}`);
   },
   /** The zip of rendered clips with platform metadata: `reelsaw export <projectId> [clipId…] --out file.zip`. Same preconditions as the Export button and the export_project tool. */
   async export(svc) {

@@ -5,6 +5,7 @@
  */
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { eachItem, uniqueBy } from "./lib/each.js";
 import { and, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { DeletedKind } from "@reelsaw/shared";
 import { schema } from "./db/index.js";
@@ -15,7 +16,6 @@ import { ASSET_RESTORE_DAYS } from "./storage/sweep.js";
 import { purgeOwnedClip, purgeOwnedProject, restoreClip, restoreProject, type Actor } from "./projects/service.js";
 
 const LIST_CAP = 200;
-const BULK_CAP = 200;
 
 export const deletedItemRefSchema = z.object({
   kind: z.enum(["project", "clip", "asset", "template"]),
@@ -35,35 +35,7 @@ async function counted(n: Promise<Array<{ n: number }>>): Promise<number> {
   return (await n)[0]?.n ?? 0;
 }
 
-/**
- * A per-item reason for the caller. A TRPCError's message is written for people (and a QuotaError
- * carries the upgrade/free-space actions); anything else is an internal failure whose text (SQL,
- * storage paths) stays in the log.
- */
-function failMessage(svc: Services, e: unknown, item: { kind: DeletedKind; id: string }, action: "restore" | "purge"): string {
-  if (e instanceof TRPCError) return e.message;
-  svc.log.child({ module: "deleted" }).error({ err: e, ...item, action }, "deleted item action failed");
-  return "Something went wrong. Try again in a moment.";
-}
-
-/** When every item failed, the first item's own error, so its code (CONFLICT, NOT_FOUND) and quota actions reach the caller. */
-function allFailed(first: unknown): never {
-  if (first instanceof TRPCError) throw first;
-  throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Something went wrong. Try again in a moment." });
-}
-
-function uniqueRefs(items: Array<{ kind: DeletedKind; id: string }>) {
-  const seen = new Set<string>();
-  const out: Array<{ kind: DeletedKind; id: string }> = [];
-  for (const it of items) {
-    const k = `${it.kind}:${it.id}`;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(it);
-    if (out.length >= BULK_CAP) break;
-  }
-  return out;
-}
+const refKey = (it: { kind: DeletedKind; id: string }) => `${it.kind}:${it.id}`;
 
 export type DeletedItem = {
   kind: DeletedKind;
@@ -255,23 +227,12 @@ function storedOf(r: unknown): number {
  * one failure does not roll the others back. tRPC `deleted.restore`; MCP loops the per-kind tools.
  */
 export async function restoreDeleted(svc: Services, actor: Actor & { id: string }, items: Array<{ kind: DeletedKind; id: string }>) {
-  const refs = uniqueRefs(items);
-  if (!refs.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Pick at least one item" });
-  const results: Array<{ kind: DeletedKind; id: string; ok: boolean; error?: string }> = [];
-  let firstError: unknown;
-  for (const it of refs) {
-    try {
-      await restoreOne(svc, actor, it);
-      results.push({ kind: it.kind, id: it.id, ok: true });
-    } catch (e) {
-      firstError ??= e;
-      results.push({ kind: it.kind, id: it.id, ok: false, error: failMessage(svc, e, it, "restore") });
-    }
-  }
+  const out = await eachItem(svc, { module: "deleted", action: "restore", empty: "Pick at least one item" }, uniqueBy(items, refKey), (it) =>
+    restoreOne(svc, actor, it),
+  );
+  const results = out.map((r) => ({ kind: r.item.kind, id: r.item.id, ok: r.ok, ...(r.ok ? {} : { error: r.error }) }));
   const restored = results.filter((r) => r.ok).length;
-  const failed = results.length - restored;
-  if (!restored) allFailed(firstError);
-  return { ok: true as const, restored, failed, results };
+  return { ok: true as const, restored, failed: results.length - restored, results };
 }
 
 /**
@@ -284,22 +245,15 @@ export async function purgeDeleted(
   items: Array<{ kind: DeletedKind; id: string }>,
   o: { forgetDecisions?: boolean } = {},
 ) {
-  const refs = uniqueRefs(items);
-  if (!refs.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Pick at least one item" });
-  const results: Array<{ kind: DeletedKind; id: string; ok: boolean; storedBytes: number; error?: string }> = [];
-  let firstError: unknown;
-  for (const it of refs) {
-    try {
-      const r = await purgeOne(svc, actor, it, o);
-      results.push({ kind: it.kind, id: it.id, ok: true, storedBytes: storedOf(r) });
-    } catch (e) {
-      firstError ??= e;
-      results.push({ kind: it.kind, id: it.id, ok: false, storedBytes: 0, error: failMessage(svc, e, it, "purge") });
-    }
-  }
+  const out = await eachItem(svc, { module: "deleted", action: "purge", empty: "Pick at least one item" }, uniqueBy(items, refKey), (it) =>
+    purgeOne(svc, actor, it, o),
+  );
+  const results = out.map((r) =>
+    r.ok
+      ? { kind: r.item.kind, id: r.item.id, ok: true, storedBytes: storedOf(r.value) }
+      : { kind: r.item.kind, id: r.item.id, ok: false, storedBytes: 0, error: r.error },
+  );
   const purged = results.filter((r) => r.ok).length;
-  const failed = results.length - purged;
   const storedBytes = results.reduce((n, r) => n + r.storedBytes, 0);
-  if (!purged) allFailed(firstError);
-  return { ok: true as const, purged, failed, storedBytes, results };
+  return { ok: true as const, purged, failed: results.length - purged, storedBytes, results };
 }
