@@ -325,6 +325,18 @@ nothing below hurts yet; every rule exists because a query or screen we already 
   break them. (The pipeline form of "Fix the class, not the instance" under Process.)
 - **Prompted models over-delete and over-claim.** Put structural guards (rules) in front and a
   verifier behind, and keep only verified uncertain results, for review.
+- **Vocabularies come from data, not from code.** An open-ended set of words (everyday English,
+  names, slang, brands, another language's stop words) typed into the source is never finished:
+  it misses the next video's words and grows one incident at a time, forever. Take it from a
+  curated dataset with a known source and licence, installed as a dependency so the lockfile pins
+  it, and choose its cut-off on purpose (a frequency tier, a size) with fixtures on both sides of
+  the line. A list in code is fine only for a **closed** set, one the grammar or our own code
+  fixes (English determiners and contraction endings, our event names), and its comment says why
+  it is closed. When no dataset fits, the judgement belongs to a model or an eval-backed rule,
+  not to a growing list. Example: entity fixes over everyday words were auto-applied because a
+  ~900-word hand list missed "don't", "gonna" and "noticing"; it is now SCOWL's dictionary
+  sizes (`wordlist-english`). `test/word-lists.test.ts` fails on a new long word list in the
+  source that is not marked closed.
 - **Operable by default.** Logs are the first debugging tool (see "Logging" under Backend /
   Structure). Every diagnosis you need more than once becomes a `reelsaw` CLI command. Events are
   readable in the activity feed.

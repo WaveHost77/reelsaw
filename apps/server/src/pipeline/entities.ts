@@ -12,6 +12,7 @@ import { abortOpt, callSignal } from "./steps.js";
 import { z } from "zod";
 import type { Word, TranscriptFlag } from "@reelsaw/shared";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import type { Logger } from "../log.js";
 
 const STOP = new Set(
@@ -20,33 +21,38 @@ const STOP = new Set(
   ),
 );
 
-/** Everyday words: a transcriber hearing one of these is usually right, so we never auto-replace them. */
-const COMMON = new Set(
-  `about above across act add after again against age ago agree air allow almost alone along already also although always among amount animal answer anyone anything appear apply area around arrive art ask away baby back bad bag ball bank base beautiful because become bed before begin behind believe below best better between big bill bird bit black blue board boat body book both bottom box boy break bring brother build business busy buy call came car card care carry case cat catch cause center century certain chair chance change check child choose church city claim class clean clear close coffee cold college color come common company computer consider continue control cost could country couple course court cover create cross cry cut dark data daughter day dead deal death decide deep degree describe design develop die difference different difficult dinner direction discuss doctor dog door double doubt draw dream drive drop during early earth east easy eat economy edge education effect effort eight either else end energy enjoy enough enter entire environment especially even evening event ever every everyone everything evidence exactly example expect experience explain eye face fact fall family far fast father fear feel few field fight figure fill film final finally find fine finish fire firm first fish five floor fly focus follow food foot force forget form forward four free friend front full fund future game garden gas general girl give glass goal good government great green ground group grow guess gun guy hair half hand hang happen happy hard head health hear heart heat heavy help high history hit hold home hope hot hotel hour house huge human hundred husband idea image imagine important improve include increase indeed industry information inside instead interest issue item job join keep key kid kill kind kitchen know land language large last late later laugh law lay lead learn least leave left leg less let letter level lie life light line list listen little live local long look lose lot love low machine main major make man manage market matter maybe mean measure meet member memory mention message middle might million mind minute miss model moment money month morning mother mouth move movie music name nation natural near nearly need network never news next nice night none north note nothing notice number occur offer office often oil old once one open order organization others outside owner page pain paper parent part particular party pass past pay peace people perhaps person phone pick picture piece place plan plant play point police policy political poor popular position possible power practice prepare present president pressure pretty price private probably problem process produce product program project property protect prove provide public pull purpose push put quality question quickly quite race radio raise range rate rather reach read ready real reason receive recent record red reduce region relate remain remember remove report represent require research rest result return reveal rich right rise risk road rock role room rule run safe sale save say scene school science score sea season seat second section security seem sell send sense series serious serve service set seven several shake share shoot short shot show side sign simple simply since sing single sister sit site situation six size skill skin small smile social society soldier somebody someone something sometimes son song soon sort sound source south space speak special speech spend sport spring staff stage stand standard star state statement station stay step stock stop store story strategy street strong structure student study stuff style subject success suddenly suffer suggest summer support sure surface system table take talk task tax teach teacher team technology television tell ten tend term test thank theory thing think third thought thousand threat three throw time tiny today together tonight top total toward town trade traditional training travel treat tree trial trip trouble true truth try turn type under understand unit until upon usually value various view visit voice vote wait walk wall want war watch water way weapon wear week weight west western whatever whether while white whole whose wide wife win wind window wish within without woman wonder word work worker world worry write writer wrong yard year yet young`.split(
-    /\s+/,
-  ),
-);
-
-/** Spoken forms transcribers write the way people say them. None is a name. */
-const CASUAL = new Set("gonna wanna gotta kinda sorta lemme gimme dunno ain't y'all yeah yep yup nope okay ok alright cool sorry".split(" "));
-
-/** "don't" is "do", "you're" is "you", "can't" is "can". A name's possessive ("Ludwig's") stays a name. */
-const CONTRACTION = /^(.+?)(n't|'re|'s|'ll|'ve|'d|'m)$/;
-const NT_STEM: Record<string, string> = { ca: "can", wo: "will", sha: "shall" };
-
-const known = (n: string) => STOP.has(n) || COMMON.has(n);
-
-/** Regular inflections back to a listed word: "noticing" → notice, "running" → run, "stories" → story, "shortly" → short. */
-function stems(n: string): string[] {
-  const out = [n.replace(/es$/, ""), n.replace(/ies$/, "y"), n.replace(/ied$/, "y"), n.replace(/ly$/, "")];
-  const base = /^(.{2,}?)(ed|ing)$/.exec(n)?.[1];
-  if (base) out.push(base, `${base}e`, base.replace(/(.)\1$/, "$1"));
+/**
+ * Everyday English comes from SCOWL (`wordlist-english`), not from a list typed here: an open vocabulary
+ * typed by hand is never finished (docs/PRINCIPLES.md, "Vocabularies come from data"). Sizes 10-50 are the words
+ * a standard dictionary has, inflections and casual spellings ("noticing", "heard", "gonna", "okay") included;
+ * 55-70 add rare words, where a name is likelier than a word. Entries with a capital are SCOWL's names and
+ * acronyms, and stay out. Loaded on first use: most processes never correct a transcript.
+ */
+const SCOWL_SIZES = [10, 20, 35, 40, 50] as const;
+const SCOWL_DIALECTS = ["english", "american", "british", "canadian", "australian"] as const;
+let everyday: Set<string> | null = null;
+function everydayWords(): Set<string> {
+  if (everyday) return everyday;
+  const require = createRequire(import.meta.url);
+  const out = new Set<string>();
+  for (const dialect of SCOWL_DIALECTS)
+    for (const size of SCOWL_SIZES)
+      for (const w of require(`wordlist-english/${dialect}-words-${size}.json`) as string[]) if (w === w.toLowerCase()) out.add(norm(w));
+  everyday = out;
   return out;
 }
 
 /**
- * Everyday English, including the contractions, casual spellings and inflections a transcript is full of. Anything
- * this misses can be replaced by an entity fix without review, so it errs towards "common".
+ * English contraction endings. A closed set fixed by the grammar, so it lives in code: "don't" is "do", "you're" is
+ * "you", "can't" is "can". A name's possessive ("Ludwig's") stays a name. SCOWL lists no contractions.
+ */
+const CONTRACTION = /^(.+?)(n't|'re|'s|'ll|'ve|'d|'m)$/;
+const NT_STEM: Record<string, string> = { ca: "can", wo: "will", sha: "shall", ai: "be" };
+
+/**
+ * Everyday English, the contractions a transcript is full of included. Anything this misses can be replaced by an
+ * entity fix without review, so it errs towards "common": a dictionary word that is also a name ("Amber") waits
+ * for review rather than changing on its own.
  */
 export function isCommonWord(w: string): boolean {
   const lower = w
@@ -54,12 +60,10 @@ export function isCommonWord(w: string): boolean {
     .toLowerCase()
     .replace(/[’‘`]/g, "'")
     .replace(/^[^\p{L}\p{N}']+|[^\p{L}\p{N}']+$/gu, "");
-  if (CASUAL.has(lower)) return true;
   const c = CONTRACTION.exec(lower);
   if (c) return isCommonWord(NT_STEM[c[1]!] ?? c[1]!);
   const n = norm(lower);
-  if (!n) return false;
-  return known(n) || COMMON.has(n.replace(/s$/, "")) || stems(n).some((s) => s !== n && known(s));
+  return !!n && (STOP.has(n) || everydayWords().has(n));
 }
 
 export interface SourceMetaLike {

@@ -13,15 +13,31 @@ describe("isCommonWord", () => {
     for (const w of ["don't", "didn't", "Hasn't", "you're", "can't", "won't", "it's", "I'm", "we'll", "they've", "she'd", "don’t"])
       assert.equal(isCommonWord(w), true, w);
   });
-  it("counts casual spoken spellings", () => {
-    for (const w of ["gonna", "wanna", "gotta", "kinda", "yeah", "okay", "cool", "sorry", "ain't", "y'all"]) assert.equal(isCommonWord(w), true, w);
+  it("counts casual spoken spellings (SCOWL lists them)", () => {
+    for (const w of ["gonna", "wanna", "gotta", "kinda", "yeah", "okay", "cool", "sorry", "ain't", "alright", "lemme"]) assert.equal(isCommonWord(w), true, w);
   });
-  it("counts regular inflections of a listed word", () => {
-    for (const w of ["noticing", "noticed", "running", "doing", "meeting", "stories", "tried", "watches", "shortly", "teams"])
+  it("counts inflected and irregular forms (SCOWL lists them)", () => {
+    for (const w of [
+      "noticing",
+      "noticed",
+      "running",
+      "doing",
+      "meeting",
+      "stories",
+      "tried",
+      "watches",
+      "shortly",
+      "teams",
+      "heard",
+      "spent",
+      "ears",
+      "dirty",
+    ])
       assert.equal(isCommonWord(w), true, w);
   });
   it("still treats names as names, possessives included", () => {
-    for (const w of ["Zorvax", "Brindle", "Kaelan", "Kaelan's", "Hera", "Fred", "Wes", "Yonnah"]) assert.equal(isCommonWord(w), false, w);
+    for (const w of ["Zorvax", "Brindle", "Kaelan", "Kaelan's", "Hera", "Fred", "Wes", "Yonnah", "Emily", "Jamal", "Christina", "Yusuf", "Ludwig"])
+      assert.equal(isCommonWord(w), false, w);
   });
 });
 
