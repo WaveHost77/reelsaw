@@ -519,7 +519,7 @@ export const TOOLS = {
   rerender_projects: {
     title: "Re-render projects",
     description:
-      "Re-render every finished or failed clip of several projects (the Projects page selection bar's Re-render), e.g. after changing your default intro/outro. Clips still preparing or rendering are skipped. Returns { rerendered, skipped, failed, results: [{ id, ok, queued?, skipped?, error? }] }; then wait_for_project. For some clips of one project use rerender_clips.",
+      "Re-render every finished or failed clip of several projects (the Projects page selection bar's Re-render), for instance after a change to your default intro/outro. Clips still preparing or rendering are skipped. Returns { rerendered, skipped, failed, results: [{ id, ok, queued?, skipped?, error? }] }; then wait_for_project. For some clips of one project use rerender_clips.",
     inputSchema: { ids: z.array(z.string()).min(1).max(200).describe("Project ids (from list_projects), 1-200") },
     annotations: { idempotentHint: true },
   },

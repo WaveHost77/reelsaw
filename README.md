@@ -589,6 +589,8 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `export_project` | A download link for a zip of the project's rendered clips with YouTube/TikTok metadata; a share link that needs no sign-in by default for connectors signed in through OAuth. |
 | `report_issue` | A download link for an issue-report zip (the same file Report an issue in the app saves; admins may include instance-wide diagnostics). |
 | `retry_project` | Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. |
+| `retry_projects` | Resume several failed projects, each from its furthest completed stage (as retry_project). |
+| `rerender_projects` | Re-render every finished or failed clip of several projects (the Projects page selection bar's Re-render), for instance after a change to your default intro/outro. |
 | `refine_project` | Re-run refine steps on the existing transcript: entities (name spelling), disfluency (filler and repeat cuts), scenes (shot cuts); all three when steps is omitted. |
 | `reanalyze_project` | Pick clips again from the existing transcript (needs one), optionally with new settings. |
 | `search_assets` | Find assets. |
@@ -608,9 +610,7 @@ schema say what it returns, whether it runs in the background and which neighbou
 | `apply_framing` | Make one clip's framing the whole project's, for a recording whose layout never changes (a slide deck with a webcam tile, a fixed camera): the clip's section at `at` (else its first framed section) gives the mode and its nudge / subject / crop, which become the project's reframe and reframeAdjust; every clip's own sections are cleared (unless keepOverrides) and the finished clips re-render. |
 | `apply_layer_template` | Write a template onto clips of one project (up to 200 clipIds, or all): its layers fitted to each clip's length, and the intro / outro it sets as each clip's own. |
 | `delete_project` | Delete one of your projects and all its clips; work in progress stops. |
-| `delete_projects` | Delete several projects at once (the Projects selection bar); each is restorable like one. |
-| `retry_projects` | Resume the failed ones of several projects, each where it stopped. |
-| `rerender_projects` | Re-render every finished or failed clip of several projects. |
+| `delete_projects` | Delete several of your projects in one step (the Projects page selection bar's Delete); work in progress stops. |
 | `purge_project` | Permanently remove a deleted project and its files so the storage is freed (find it with list_deleted or list_projects deleted: true). |
 | `restore_project` | Bring back a deleted project with its clips and files (find it with list_deleted or list_projects deleted: true); restoring a project that is not deleted changes nothing. |
 | `restore_clip` | Bring back a deleted clip or one a re-analyze replaced (list_deleted or get_project → replacedClips); it goes to the end of the project's clips. |

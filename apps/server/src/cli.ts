@@ -71,7 +71,7 @@ import { describeRun, runsOfProject } from "./pipeline/runs.js";
  *   refine <projectId> [--steps entities,disfluency,scenes] [--vocabulary text]
  *                                           re-run refine steps on the existing transcript, then re-render (same as projects.refine and refine_project)
  *   delete-project <projectId> [--forget-decisions]   delete a project, restorable like a clip (same as projects.delete and delete_project); --forget-decisions forgets its decisions when it is purged
- *   delete-projects <projectId…> [--forget-decisions]  delete several projects (same as the Projects selection bar, projects.deleteMany and delete_projects)
+ *   delete-projects <projectId…> [--forget-decisions]   delete several projects (same as the Projects selection bar, projects.deleteMany and delete_projects)
  *   retry-projects <projectId…>             resume the failed ones of several projects (projects.retryMany and retry_projects); others are skipped
  *   rerender-projects <projectId…>          re-render every finished or failed clip of several projects (projects.rerenderMany and rerender_projects)
  *   export <projectId> [clipId…] --out <file.zip>
@@ -2801,7 +2801,7 @@ async function run() {
   const fn = cmd ? commands[cmd] : undefined;
   if (!fn) {
     console.log(
-      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
+      "usage: reelsaw <version|releases|users|users-bulk|approve|make-admin|set-password|usage|limits|email-prefs|abuse|signup-rules|billing|settings|retention|deleted|restore|restore-clip|delete-clip|delete-clips|purge-clip|captions|transcript-file|import-transcript|update-project|update-style|source-text|check-source|create-project|retry|reanalyze|refine|delete-project|delete-projects|retry-projects|rerender-projects|export|create-clip|update-clip|purge|purge-project|decisions|media-links|webhooks|machine|ytdlp-proxies|workers|queue|failure|retry-failures|status|storage|events|clip|faces|import-report|report|rerender|stuck|recover|logs|log-level|cuts|align|test-model|hear|flags|scenes|overlays|library|project-bumpers|clip-bumpers|clip-layers|apply-framing|templates|catalog|mcp> ...  (see src/cli.ts)",
     );
     process.exit(cmd ? 2 : 0);
   }
