@@ -80,7 +80,7 @@ export const DOCS: Record<string, [GroupId, string]> = {
   ],
   TRUSTED_PROXY_HEADER: [
     "accounts",
-    "Header that carries the client address when `TRUST_PROXY` is on: `x-forwarded-for` (default; Caddy, nginx, most load balancers), `cf-connecting-ip` (Cloudflare, with the origin closed to everything else) or `x-real-ip`. Only the selected header is read, so a client cannot choose its address by sending a different one.",
+    "Header that carries the client address when `TRUST_PROXY` is on: `x-forwarded-for` (default; Caddy, nginx, most load balancers), `cf-connecting-ip` (Cloudflare, with the origin closed to everything else) or `x-real-ip` (Railway, whose edge sets it to the visitor's address). Only the selected header is read, so a client cannot choose its address by sending a different one.",
   ],
   TRUSTED_PROXY_HOPS: [
     "accounts",
