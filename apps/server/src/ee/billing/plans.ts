@@ -4,6 +4,7 @@
  * Free is in the same list with no price: it is what an account with no subscription (or a lapsed one) gets.
  * `website/content/pricing.ts` mirrors this list for reelsaw.com; the "pricing content" case in `test/billing.test.ts` keeps them equal.
  */
+import { FREE_PLAN } from "@reelsaw/shared";
 import type { Limits } from "../../quota.js";
 
 export type Interval = "month" | "year";
@@ -31,7 +32,7 @@ export interface Plan {
 
 export const PLANS: Plan[] = [
   {
-    name: "free",
+    name: FREE_PLAN,
     label: "Free",
     price: null,
     lookupKeys: null,

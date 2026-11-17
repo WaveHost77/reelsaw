@@ -194,44 +194,30 @@ export default async function HomePage() {
           <div className="container-page flex flex-col items-center gap-8 pt-16 pb-12 text-center sm:pt-24">
             <p className="chip border border-line bg-panel text-ink2">
               <Lock className="h-3.5 w-3.5 text-acc-text" aria-hidden />
-              Open source · Fully local, no API keys · Or any AI provider
+              Open source · Hosted or self-hosted · MCP for agents
             </p>
             <h1 id="hero-title" className="text-[40px] leading-[1.02] font-extrabold tracking-[-0.02em] sm:text-[60px]">
               Long videos in.
               <br />
               Vertical clips out.
-              <br />
-              On your hardware, or hosted.
             </h1>
             <p className="max-w-[60ch] text-[17px] leading-relaxed text-ink2 text-pretty sm:text-[19px]">
-              Reelsaw transcribes a video, asks a language model for the most clippable moments, then renders 9:16 clips with word-highlight captions and a hook
-              overlay. Every model runs on your machine by default, with no API key. Or point each one at any vendor you like.
+              Paste a YouTube link or upload a file. Reelsaw transcribes it, finds the most clippable moments, then renders 9:16 clips with word-highlight
+              captions and a hook overlay, ready to post.
             </p>
-            <div className="flex w-full max-w-[720px] flex-col gap-3">
-              <Command text={SITE.installSh} caption="macOS / Linux / WSL2 · needs Docker" />
-              <p className="text-xs text-ink3">
-                Installs the fully local stack: Ollama for the language model and Speaches for speech-to-text.{" "}
-                <a href="#install" className="prose-link">
-                  Windows, hosted providers and from source
-                </a>
-                .
-              </p>
-            </div>
             <div className="flex flex-col items-center gap-3">
               <div className="flex flex-wrap items-center justify-center gap-3">
-                <a href={SITE.github} target="_blank" rel="noreferrer" className="btn-primary h-10 px-4 text-sm">
+                <a href={appLink("/signup", "home_hero")} className="btn-primary h-11 px-5 text-[15px]">
+                  Clip a video free <ArrowRight className="h-4 w-4" aria-hidden />
+                </a>
+                <a href={SITE.github} target="_blank" rel="noreferrer" className="btn-ghost h-11 px-4 text-sm">
                   <GitHubMark /> Star on GitHub
                 </a>
-                <a href={SITE.changelog} className="btn-ghost h-10 px-4 text-sm">
-                  Latest release <ArrowRight className="h-4 w-4" aria-hidden />
+                <a href="#install" className="btn-ghost h-11 px-4 text-sm">
+                  <Cpu className="h-4 w-4" aria-hidden /> Self-host
                 </a>
               </div>
-              <p className="text-sm text-ink3">
-                Prefer not to run a machine?{" "}
-                <a href={appLink("/", "home_hosted_free")} className="prose-link">
-                  Try the hosted Free plan
-                </a>
-              </p>
+              <p className="text-sm text-ink3">Your first video free, up to 60 minutes. No card, nothing to install.</p>
             </div>
           </div>
           <div className="container-page pb-20">
@@ -458,8 +444,8 @@ export default async function HomePage() {
           <div className="container-page flex flex-col gap-12">
             <SectionHeading
               id="install-title"
-              eyebrow="Install"
-              title="One command, no source needed"
+              eyebrow="Self-host"
+              title="Run it yourself: one command, no source needed"
               body="Needs Docker with Compose and about 10 GB of disk. The script writes ~/reelsaw with a compose file and generated secrets, pulls the published image and a language model sized to your RAM, then waits until the app answers."
             />
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

@@ -1,6 +1,6 @@
 import { GitHubMark, Logo } from "./logo";
 import { ThemeToggle } from "./theme";
-import { SITE } from "@/lib/site";
+import { SITE, appLink } from "@/lib/site";
 
 const NAV = [
   { href: "/#how-it-works", label: "How it works" },
@@ -8,7 +8,7 @@ const NAV = [
   { href: "/#agents", label: "Agents" },
   { href: "/alternatives", label: "Compare" },
   { href: "/pricing", label: "Pricing" },
-  { href: "/#install", label: "Install" },
+  { href: "/#install", label: "Self-host" },
 ];
 
 export function Header() {
@@ -24,11 +24,14 @@ export function Header() {
           ))}
         </nav>
         <div className="flex items-center gap-2">
-          <a href={SITE.github} target="_blank" rel="noreferrer" className="btn-ghost h-[34px]">
+          <a href={SITE.github} target="_blank" rel="noreferrer" className="btn-ghost h-[34px]" aria-label="Reelsaw on GitHub">
             <GitHubMark />
-            <span className="hidden sm:inline">GitHub</span>
+            <span className="hidden lg:inline">GitHub</span>
           </a>
           <ThemeToggle />
+          <a href={appLink("/signup", "header")} className="btn-primary h-[34px] px-3 text-sm whitespace-nowrap">
+            Start free
+          </a>
         </div>
       </div>
     </header>

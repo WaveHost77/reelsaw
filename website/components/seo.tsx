@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import type { Faq, Link, Table } from "@/content/types";
 import { SITE, appLink } from "@/lib/site";
+import { GitHubMark } from "./logo";
 import { ScrollArea } from "./scroll-area";
 
 /** Structured data for search engines. `<` is escaped so no string in it can close the script tag. */
@@ -125,19 +126,19 @@ export function TryIt() {
       <div>
         <p className="text-[16px] font-bold">Try it: paste a link, get vertical clips</p>
         <p className="mt-1 text-sm text-ink2">
-          One command installs Reelsaw with Docker: no plan, no meter, no watermark. Or{" "}
-          <a href={appLink("/", "seo_hosted_free")} className="prose-link">
-            start on the hosted Free plan
-          </a>
-          .
+          Your first video is free on the hosted app, up to 60 minutes, with no card and nothing to install. Or{" "}
+          <a href="/#install" className="prose-link">
+            self-host it
+          </a>{" "}
+          with one command: no plan, no meter, no watermark.
         </p>
       </div>
       <div className="flex shrink-0 gap-2">
-        <a href="/#install" className="btn-primary">
-          Install Reelsaw
+        <a href={appLink("/signup", "seo_try_it")} className="btn-primary">
+          Clip a video free
         </a>
         <a href={SITE.github} target="_blank" rel="noreferrer" className="btn-ghost">
-          Source on GitHub
+          <GitHubMark /> Star on GitHub
         </a>
       </div>
     </aside>

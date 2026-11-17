@@ -6,9 +6,9 @@ import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import { SITE, appLink } from "@/lib/site";
 
-const title = "Pricing: self-host for free, or let us host it";
+const title = "Pricing: start free hosted, or self-host for $0";
 const description =
-  "Self-host Reelsaw for $0, or use app.reelsaw.com: a Free plan, then Starter $12, Creator $29 and Pro $59 a month, metered in minutes of source video.";
+  "Use app.reelsaw.com from $0: a Free plan, then Starter $12, Creator $29 and Pro $59 a month, metered in minutes of source video. Or self-host Reelsaw for $0.";
 
 export const metadata: Metadata = {
   title,
@@ -33,10 +33,11 @@ export default function PricingPage() {
             ]}
           />
           <p className="eyebrow">Pricing</p>
-          <h1 className="text-[32px] leading-[1.1] font-extrabold tracking-tight text-balance sm:text-[44px]">Self-host for free, or let us host it</h1>
+          <h1 className="text-[32px] leading-[1.1] font-extrabold tracking-tight text-balance sm:text-[44px]">Start free hosted, or self-host for $0</h1>
           <p className="max-w-[70ch] text-[16px] leading-relaxed text-ink2 text-pretty">
-            The software is AGPL-3.0: install it on your own machine and there is no plan, no meter and no watermark. The hosted service runs the same code on
-            our machines with cloud models, and is priced by minutes of source video a month. Every plan has every feature, including the MCP server for agents.
+            The hosted service runs Reelsaw on our machines with cloud models: nothing to install, priced by minutes of source video a month, and every plan has
+            every feature, including the MCP server for agents. The software is AGPL-3.0, so you can also install it on your own machine with no plan, no meter
+            and no watermark.
           </p>
         </header>
 
@@ -65,8 +66,9 @@ export default function PricingPage() {
                     </li>
                   ))}
                 </ul>
+                {/* only a paid plan carries `plan`: the app sends that sign-up to checkout; a Free sign-up belongs on a new project */}
                 <a
-                  href={appLink("/signup", `pricing_${p.name}`, { plan: p.name })}
+                  href={appLink("/signup", `pricing_${p.name}`, p.price ? { plan: p.name } : {})}
                   className={`${p.name === "creator" ? "btn-primary" : "btn-ghost"} mt-auto h-[42px] justify-center`}
                 >
                   {p.price ? `Start with ${p.label}` : "Start for free"}
@@ -95,7 +97,7 @@ export default function PricingPage() {
             open-source build.
           </p>
           <div className="flex flex-wrap gap-3">
-            <a href="/#install" className="btn-primary h-[42px]">
+            <a href="/#install" className="btn-ghost h-[42px]">
               Install Reelsaw
             </a>
             <a href={SITE.deployDocs} target="_blank" rel="noreferrer" className="btn-ghost h-[42px]">
