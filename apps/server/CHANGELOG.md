@@ -1,5 +1,13 @@
 # @reelsaw/server
 
+## 0.40.1
+
+### Patch Changes
+
+- [#284](https://github.com/osbytes/reelsaw/pull/284) [`9c8f3a3`](https://github.com/osbytes/reelsaw/commit/9c8f3a324d0c1b0ad01a9d30190d1e3540df664e) Thanks [@dillonstreator](https://github.com/dillonstreator)! - Signing up for the Free plan from the website now lands on a new project instead of the Billing page, where there was nothing to buy. Analytics for self-hosted instances with PostHog: a signed-out visit no longer resets the anonymous visitor, so the UTM tags a visitor arrived with stay on their sign-up and later events.
+
+- [#284](https://github.com/osbytes/reelsaw/pull/284) [`2ea20cd`](https://github.com/osbytes/reelsaw/commit/2ea20cd5bb640c1725bf99d4bdc188a7558f2ede) Thanks [@dillonstreator](https://github.com/dillonstreator)! - On Railway, the server now warns at boot when `TRUSTED_PROXY_HEADER` is left on `x-forwarded-for`. Railway's edge puts the visitor's address in `X-Real-IP`, so read from `X-Forwarded-For` every sign-up shares one address, which floods the `shared_ip` abuse flag and makes the per-address sign-up cap meaningless. The configuration docs and README now say to set `TRUSTED_PROXY_HEADER=x-real-ip` there.
+
 ## 0.40.0
 
 ### Minor Changes
