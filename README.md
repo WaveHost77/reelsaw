@@ -441,7 +441,8 @@ them), so a single-user box stays as it is:
   the sign-up cap and the registration limit key on the client address. With the default
   `x-forwarded-for` it is the entry `TRUSTED_PROXY_HOPS` places from the right (1 behind Caddy,
   2 behind Cloudflare and Caddy), so addresses a client prepends do not count; the other headers
-  are read only when selected.
+  are read only when selected. On Railway set `TRUSTED_PROXY_HEADER=x-real-ip`: its edge puts the
+  visitor's address there, and the server warns at boot when it is left on `x-forwarded-for`.
 
 ## Billing (enterprise edition)
 

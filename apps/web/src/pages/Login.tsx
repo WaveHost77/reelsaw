@@ -4,6 +4,7 @@ import {
   CONFIRM_EMAIL_THEN_SIGN_IN,
   signupCreatedNotice,
   billingPlanPath,
+  FREE_PLAN,
   INTERVAL_PARAM,
   PLAN_PARAM,
   REPO_URL,
@@ -54,7 +55,8 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
     const plan = q.get(PLAN_PARAM);
     if (!plan || !/^[a-z0-9_-]{1,40}$/.test(plan)) return null;
     const interval = q.get(INTERVAL_PARAM) === "year" ? "year" : "month";
-    rememberAfterSignIn(billingPlanPath(plan, interval));
+    // Free has nothing to buy: that sign-up goes where everyone else's does (a new project), not to the Billing page
+    if (plan !== FREE_PLAN) rememberAfterSignIn(billingPlanPath(plan, interval));
     return plan;
   });
   const fromLink = verifyEmailErrorFromSearch(window.location.search);

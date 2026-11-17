@@ -16,6 +16,9 @@ export const INTERVAL_PARAM = "interval";
 
 export type BillingInterval = "month" | "year";
 
+/** The plan an account is on without a subscription. Nothing to check out, so a sign-up for it skips the Billing page. */
+export const FREE_PLAN = "free";
+
 /** The Billing page, optionally with the outcome of a Stripe round trip. */
 export function billingPath(outcome?: CheckoutOutcome): string {
   return outcome ? `${BILLING_PATH}?${CHECKOUT_PARAM}=${outcome}` : BILLING_PATH;

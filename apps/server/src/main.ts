@@ -37,6 +37,12 @@ async function main() {
     );
   }
 
+  // Railway's edge puts the visitor in X-Real-IP; read from X-Forwarded-For, every sign-up shares one address
+  // (abuse flags and the per-address sign-up cap stop meaning anything). Railway sets RAILWAY_ENVIRONMENT_NAME itself.
+  if (process.env.RAILWAY_ENVIRONMENT_NAME && config.TRUST_PROXY && config.TRUSTED_PROXY_HEADER === "x-forwarded-for") {
+    log.warn({ header: config.TRUSTED_PROXY_HEADER }, "running on Railway: set TRUSTED_PROXY_HEADER=x-real-ip, or every client shares Railway's address");
+  }
+
   // a rejection nobody awaited is a bug worth a line (and a stack); an uncaught exception leaves unknown state
   process.on("unhandledRejection", (err) => {
     log.error({ err }, "unhandled rejection");

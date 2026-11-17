@@ -115,7 +115,13 @@ export function initTelemetry(t: Public | null | undefined): Promise<void> {
 export function identify(user: { id: string; role: string } | null) {
   whenReady(() => {
     if (!user) {
-      ph?.reset();
+      // Only a browser that was signed in as someone gets a fresh identity. Every signed-out page load lands here too,
+      // and resetting an anonymous visitor would drop the landing UTM tags registered at init and start a new
+      // anonymous id, so the sign-up that follows would never join the visit that came from the website.
+      if (ph?.get_property("$user_state") === "identified") {
+        ph.reset();
+        if (Object.keys(landingUtm).length) ph.register_once(landingUtm);
+      }
       sb?.setUser(null);
       return;
     }
