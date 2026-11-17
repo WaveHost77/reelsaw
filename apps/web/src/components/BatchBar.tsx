@@ -74,7 +74,7 @@ export function BatchBar({
   const later = (fn: () => void) => window.setTimeout(fn, 0);
 
   return (
-    <SelectionBar label="Selected clips" count={selected.length} onClear={onClear}>
+    <SelectionBar label="Selected clips" count={selected.length} busy={many.isPending || delMany.isPending} onClear={onClear}>
       <button
         className="btn-ghost"
         disabled={!renderable.length || many.isPending}
@@ -154,25 +154,19 @@ export function BatchBar({
         danger
         onConfirm={() => {
           const clips = selected;
-          delMany.mutate(
-            { projectId, clipIds: clips.map((c) => c.id) },
-            {
-              onSuccess: (r) => {
-                onClear();
-                onChanged();
-                if (!r.deleted) {
-                  toast(r.skipped ? "Those clips were already deleted" : "Nothing deleted");
-                  return;
-                }
-                notifyDeleted({
-                  items: clips.map((c) => ({ kind: "clip", id: c.id, title: c.title })),
-                  restorable: r.restorable,
-                  storedBytes: r.storedBytes,
-                });
-              },
-              onError: (e) => toast.error(e.message),
-            },
-          );
+          return delMany.mutateAsync({ projectId, clipIds: clips.map((c) => c.id) }).then((r) => {
+            onClear();
+            onChanged();
+            if (!r.deleted) {
+              toast(r.skipped ? "Those clips were already deleted" : "Nothing deleted");
+              return;
+            }
+            notifyDeleted({
+              items: clips.map((c) => ({ kind: "clip", id: c.id, title: c.title })),
+              restorable: r.restorable,
+              storedBytes: r.storedBytes,
+            });
+          });
         }}
       />
     </SelectionBar>

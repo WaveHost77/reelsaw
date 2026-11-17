@@ -256,9 +256,9 @@ export function AssetFinder({
 
   const fadeOut = (a: LibraryAsset) => {
     setLeaving((s) => new Set(s).add(a.id));
-    window.setTimeout(() => void actions.deleteAsset(a).then(() => setLeaving((s) => (s.delete(a.id), new Set(s)))), 160);
+    return new Promise((r) => window.setTimeout(r, 160)).then(() => actions.deleteAsset(a)).then(() => setLeaving((s) => (s.delete(a.id), new Set(s))));
   };
-  const deleteAsset = (a: LibraryAsset) => (a.usedBy || a.usedByTemplates ? setDeleting(a) : fadeOut(a));
+  const deleteAsset = (a: LibraryAsset) => (a.usedBy || a.usedByTemplates ? setDeleting(a) : void fadeOut(a));
   const select = (a: LibraryAsset) => nav({ pathname: loc.pathname, search: loc.search, hash: selected === a.id ? "" : `#asset=${a.id}` }, { replace: true });
   const viewing = list.data?.assets.find((a) => a.id === viewingId) ?? null;
 
@@ -462,7 +462,7 @@ export function AssetFinder({
             onRename={(name) => viewing && void actions.rename(viewing, name)}
             onTags={(tags) => viewing && void actions.setTags(viewing, tags)}
           />
-          <DeleteAssetDialog asset={deleting} onClose={() => setDeleting(null)} onConfirm={() => deleting && fadeOut(deleting)} />
+          <DeleteAssetDialog asset={deleting} onClose={() => setDeleting(null)} onConfirm={() => (deleting ? fadeOut(deleting) : Promise.resolve())} />
         </>
       )}
     </div>

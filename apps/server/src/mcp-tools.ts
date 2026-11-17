@@ -36,10 +36,10 @@ Which tool when:
 - fix the transcript: list_transcript_flags (the automatic and suggested fixes with ids), review_transcript_flags (accept or reject them), add_transcript_correction (captions say other words for a span), add_transcript_cut (drop a span from the video)
 - change: update_clip (one clip's text, bounds, framing, style, layers), create_clip (a new moment from a time range), update_project (title and settings, nothing re-run), update_project_style (caption look and fades for every clip, re-renders), set_project_source_text (hide or keep text burned into the source, re-renders), reanalyze_project (pick clips again); get_project_defaults / set_project_defaults (the settings every new project starts with)
 - reuse a look: save_layer_template (from a clip) then apply_layer_template (to clips); layerTemplateId in update_project covers future clips only. One framing for the whole video (slides, a fixed camera): set it on one clip with update_clip, then apply_framing
-- recover: retry_project (resume a failed project where it stopped) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project)
+- recover: retry_project (resume a failed project where it stopped; retry_projects for several) vs reanalyze_project (different clips); render: rerender_clip (one clip) vs rerender_clips (many clips of a project) vs rerender_projects (every clip of several projects)
 Your library (search_assets, add_asset, update_asset, delete_asset, restore_asset, asset_usage) holds videos, images, GIFs, SVGs and sounds. Bumpers are short intro/outro videos or images (max 10 s) from it that are joined around every clip; set one as your default for new projects (set_default_bumper), per project (set_project_bumpers) or per clip (set_clip_bumpers). Bumpers are burned into the rendered video, so a change only shows after a re-render: pass rerender: true to re-render just the affected clips. The same library items go on a clip as layers over a time range: update_clip { layers: [{ kind: "asset", id, assetId, start, end, x, y, w }, { kind: "text", id, text, start, end, x, y, size, color, box }, { kind: "audio", id, assetId, start, end, volume, duck, fade, loop }] } (a sound effect is an audio layer with loop false, duck false, fade 0).
 Layer templates (list_layer_templates, save_layer_template, update_layer_template, delete_layer_template, restore_layer_template, apply_layer_template) are sets of layers whose timing fits any clip length (head = first seconds, tail = last seconds, fill = whole clip, relative = fractions of the clip), optionally with an intro and outro: save one from a clip you styled, then apply_layer_template puts it on chosen clips (clips keep their own copy of the layers and get the template's intro / outro as their own choice), and update_project { settings: { layerTemplateId } } gives every clip created afterwards the template.
-Deleting is reversible for a while: delete_project, delete_clip / delete_clips and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze. list_deleted is the Deleted page: one list of projects, clips of live projects, library items and templates with when they auto-remove. A deleted item still counts toward storage until you purge it (purge_project, purge_clip, purge_asset, purge_layer_template) or the retention sweep does; minutes, hourly creates and first-video-free are never refunded.
+Deleting is reversible for a while: delete_project / delete_projects, delete_clip / delete_clips and the clips a reanalyze_project replaces can be brought back (restore_project, restore_clip); clips you made or edited survive a re-analyze. list_deleted is the Deleted page: one list of projects, clips of live projects, library items and templates with when they auto-remove. A deleted item still counts toward storage until you purge it (purge_project, purge_clip, purge_asset, purge_layer_template) or the retention sweep does; minutes, hourly creates and first-video-free are never refunded.
 Reelsaw learns from what you decide: accepts, rejects, cuts, corrections and clip edits go in your decision log (list_decisions, export_decisions for evals), which outlives deleted projects; forget_decisions or purge_project forgetDecisions: true removes entries, set_learning turns recording off.
 You only see and change your own projects and library. Admins may pass instance: true on report_issue to include unfinished work and errors across the instance. All ids are strings. Times are seconds from the start of the source video. Media URLs (get_clip's video and thumbnail links) need an API key from Settings as the Authorization header; an OAuth sign-in from your MCP client does not open them and your shell does not hold it. To download clips yourself, use get_media_links (one share link per clip, no sign-in) or export_project (a zip, a share link by default when signed in through your client); share links also suit schedulers, Instagram and Zapier. Reelsaw answers 401 or 404, never 403: a 403 on a download comes from your own sandbox's network allowlist, so ask the user to allow this server's host there.`;
 
@@ -510,6 +510,19 @@ export const TOOLS = {
       "Resume a failed or stuck project from its furthest completed stage: re-render unfinished clips if there are clips, else pick clips, refine or transcribe again. Finished clips, the transcript and the source are kept. Returns { queue } (the stage restarted); then wait_for_project. To pick different clips use reanalyze_project instead.",
     inputSchema: { id: projectId() },
   },
+  retry_projects: {
+    title: "Retry projects",
+    description:
+      "Resume several failed projects, each from its furthest completed stage (as retry_project). Projects that are not failed are skipped and left as they are; one project's failure does not stop the others. Returns { retried, skipped, failed, results: [{ id, ok, retried?, error? }] }; then wait_for_project on each.",
+    inputSchema: { ids: z.array(z.string()).min(1).max(200).describe("Project ids (from list_projects), 1-200") },
+  },
+  rerender_projects: {
+    title: "Re-render projects",
+    description:
+      "Re-render every finished or failed clip of several projects (the Projects page selection bar's Re-render), for instance after a change to your default intro/outro. Clips still preparing or rendering are skipped. Returns { rerendered, skipped, failed, results: [{ id, ok, queued?, skipped?, error? }] }; then wait_for_project. For some clips of one project use rerender_clips.",
+    inputSchema: { ids: z.array(z.string()).min(1).max(200).describe("Project ids (from list_projects), 1-200") },
+    annotations: { idempotentHint: true },
+  },
   refine_project: {
     title: "Refine project",
     description:
@@ -688,6 +701,19 @@ export const TOOLS = {
         .describe(
           "Forget what Reelsaw learned from it (its decision log entries) when it is deleted for good, by purge_project or the retention sweep; restoring it cancels that. Default false keeps them",
         ),
+    },
+    annotations: { destructiveHint: true, idempotentHint: true },
+  },
+  delete_projects: {
+    title: "Delete projects",
+    description:
+      "Delete several of your projects in one step (the Projects page selection bar's Delete); work in progress stops. Each is restorable like delete_project (restore_project, for DELETED_RETENTION_DAYS) and still counts toward storage until purged. Already-deleted ids are skipped; one project's failure does not stop the others. Returns { deleted, skipped, failed, restorable, storedBytes, results: [{ id, ok, changed?, error? }] }.",
+    inputSchema: {
+      ids: z.array(z.string()).min(1).max(200).describe("Project ids (from list_projects), 1-200"),
+      forgetDecisions: z
+        .boolean()
+        .default(false)
+        .describe("Forget what Reelsaw learned from them when they are deleted for good (as delete_project). Default false keeps them"),
     },
     annotations: { destructiveHint: true, idempotentHint: true },
   },

@@ -52,10 +52,7 @@ export function ConnectedAppsSection() {
         body={<>“{confirm?.name}” loses access to your account straight away.</>}
         confirm="Revoke"
         danger
-        onConfirm={() => {
-          if (confirm) revoke.mutate({ clientId: confirm.clientId });
-          setConfirm(null);
-        }}
+        onConfirm={() => (confirm ? revoke.mutateAsync({ clientId: confirm.clientId }) : Promise.resolve())}
       />
     </section>
   );

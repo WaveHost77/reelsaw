@@ -6,6 +6,7 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Popover from "@radix-ui/react-popover";
 import { useTRPC } from "../lib/trpc";
+import { pendingToast } from "../lib/pendingToast";
 import { toast } from "sonner";
 import { useProjectEvents } from "../lib/projectEvents";
 import { LiveStatusPill } from "../components/LiveStatusPill";
@@ -603,10 +604,10 @@ export function ProjectPage() {
                 <DropdownMenu.Item
                   className="menu-item block"
                   onSelect={() =>
-                    orToast(
-                      rerenderMany
-                        .mutateAsync({ projectId: id, clipIds: failedClips.map((c) => c.id) })
-                        .then((r) => (invalidate(), toast(`Retrying ${r.rerendered} failed clip${r.rerendered === 1 ? "" : "s"}`))),
+                    void pendingToast(
+                      `Queuing ${failedClips.length} failed clip${failedClips.length === 1 ? "" : "s"}…`,
+                      rerenderMany.mutateAsync({ projectId: id, clipIds: failedClips.map((c) => c.id) }),
+                      (r) => (invalidate(), `Retrying ${r.rerendered} failed clip${r.rerendered === 1 ? "" : "s"}`),
                       "Couldn’t retry the failed clips",
                     )
                   }
@@ -618,7 +619,7 @@ export function ProjectPage() {
                 <DropdownMenu.Item
                   className="menu-item block"
                   disabled={retry.isPending}
-                  onSelect={() => orToast(retry.mutateAsync({ id }).then(invalidate), "Couldn’t restart")}
+                  onSelect={() => void pendingToast("Resuming…", retry.mutateAsync({ id }), () => (invalidate(), "Pipeline resumed"), "Couldn’t restart")}
                 >
                   Resume pipeline
                   <div className="text-xs text-ink3">From the last stage that didn’t finish</div>
@@ -1139,7 +1140,7 @@ export function ProjectPage() {
         body="Every share link to its clips and zip stops working now, for queued scheduler posts and people you sent them to as well. They cannot be turned back on; copying a link again makes a new one."
         confirm="Revoke links"
         danger
-        onConfirm={() => revokeLinks.mutate({ projectId: id })}
+        onConfirm={() => revokeLinks.mutateAsync({ projectId: id })}
       />
       <ConfirmDialog
         open={confirm === "repick"}

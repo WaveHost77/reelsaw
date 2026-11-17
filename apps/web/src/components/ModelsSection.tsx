@@ -240,10 +240,7 @@ export function ModelsSection() {
         body="The saved key and server address are deleted and this provider falls back to .env. Without credentials there, its models stop working for everyone until the key is entered again."
         confirm="Remove"
         danger
-        onConfirm={() => {
-          if (clearing) clearCredentials.mutate({ provider: clearing });
-          setClearing(null);
-        }}
+        onConfirm={() => (clearing ? clearCredentials.mutateAsync({ provider: clearing }) : Promise.resolve())}
       />
       <StickyPanelFooter>
         <span className="mr-auto text-[12px] text-ink3">

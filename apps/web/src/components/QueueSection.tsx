@@ -135,7 +135,7 @@ export function QueueSection() {
   const openFail = (key: FailKey) => writeFail(key);
   const closeFail = () => writeFail(null);
 
-  const onRetry = (ids?: Array<{ kind: "project" | "clip"; id: string }>, thenClose = false) => {
+  const onRetry = (ids?: Array<{ kind: "project" | "clip"; id: string }>, thenClose = false) =>
     retry
       .mutateAsync({ ...filter, ids })
       .then((r) => {
@@ -149,8 +149,7 @@ export function QueueSection() {
         invalidate();
         if (thenClose) closeFail();
       })
-      .catch((err: Error) => toast.error(err.message));
-  };
+      .catch((err: Error) => void toast.error(err.message));
 
   const d = queue.data;
   const waiting = d?.queues.reduce((n, r) => n + r.waiting + r.retrying, 0) ?? 0;

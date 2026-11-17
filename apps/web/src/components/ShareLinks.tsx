@@ -268,10 +268,7 @@ export function ShareLinksSection() {
         body={`The link to “${confirmOne?.title ?? "this file"}” stops working now, for queued scheduler posts and people you sent it to as well. It cannot be turned back on; copying a link again makes a new one.`}
         confirm="Revoke"
         danger
-        onConfirm={() => {
-          if (confirmOne) revoke.mutate({ linkId: confirmOne.id });
-          setConfirmOne(null);
-        }}
+        onConfirm={() => (confirmOne ? revoke.mutateAsync({ linkId: confirmOne.id }) : Promise.resolve())}
       />
       <ConfirmDialog
         open={confirmAll}
@@ -280,10 +277,7 @@ export function ShareLinksSection() {
         body="Every share link you or your webhooks handed out stops working now: queued scheduler posts and links you sent people included. New links can be copied again."
         confirm="Revoke all"
         danger
-        onConfirm={() => {
-          revoke.mutate({ all: true });
-          setConfirmAll(false);
-        }}
+        onConfirm={() => revoke.mutateAsync({ all: true })}
       />
     </section>
   );

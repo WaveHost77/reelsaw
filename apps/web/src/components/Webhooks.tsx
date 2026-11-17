@@ -468,10 +468,7 @@ export function WebhooksSection() {
           </>
         }
         confirm="Rotate secret"
-        onConfirm={() => {
-          if (confirmRotate) rotate.mutate({ id: confirmRotate.id });
-          setConfirmRotate(null);
-        }}
+        onConfirm={() => (confirmRotate ? rotate.mutateAsync({ id: confirmRotate.id }) : Promise.resolve())}
       />
       <ConfirmDialog
         open={!!confirmDelete}
@@ -481,9 +478,11 @@ export function WebhooksSection() {
         confirm="Delete"
         danger
         onConfirm={() => {
-          if (confirmDelete) remove.mutate({ id: confirmDelete.id });
-          if (confirmDelete?.id === selected) setSelected(null);
-          setConfirmDelete(null);
+          if (!confirmDelete) return Promise.resolve();
+          const id = confirmDelete.id;
+          return remove.mutateAsync({ id }).then(() => {
+            if (id === selected) setSelected(null);
+          });
         }}
       />
     </section>

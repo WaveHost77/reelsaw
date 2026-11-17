@@ -627,6 +627,12 @@ export function createMcpServer(
 
   server.registerTool("delete_project", TOOLS.delete_project, ({ id, forgetDecisions }) => run(() => api.projects.delete({ id, forgetDecisions })));
 
+  server.registerTool("delete_projects", TOOLS.delete_projects, (input) => run(() => api.projects.deleteMany(input)));
+
+  server.registerTool("retry_projects", TOOLS.retry_projects, (input) => run(() => api.projects.retryMany(input)));
+
+  server.registerTool("rerender_projects", TOOLS.rerender_projects, (input) => run(() => api.projects.rerenderMany(input)));
+
   server.registerTool("purge_project", TOOLS.purge_project, ({ id, forgetDecisions }) => run(() => api.projects.purge({ id, forgetDecisions })));
 
   server.registerTool("list_decisions", TOOLS.list_decisions, (input) =>

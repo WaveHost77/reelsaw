@@ -284,7 +284,7 @@ export function InstanceSettingsGroup({
         body="It applies across the instance within seconds."
         confirm="Save"
         danger
-        onConfirm={() => save.mutate(patch)}
+        onConfirm={() => save.mutateAsync(patch)}
       >
         <ul className="list-disc pl-5 text-sm leading-relaxed text-ink2">
           {risks.map((r) => (

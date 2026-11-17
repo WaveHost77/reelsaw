@@ -2948,24 +2948,18 @@ export function ClipEditor(props: Props) {
         body={`“${title || "Untitled clip"}” is hidden from the project. Unsaved edits are discarded. ${keepWindow.hint()} Storage still counts until you delete it forever.`}
         confirm="Delete clip"
         danger
-        onConfirm={() => {
-          delClip.mutate(
-            { id: clip.id },
-            {
-              onSuccess: (r) => {
-                guard.allowLeave();
-                onExit();
-                notifyDeleted({
-                  items: [{ kind: "clip", id: clip.id, title: title || "Untitled clip" }],
-                  restorable: r.restorable,
-                  storedBytes: r.storedBytes,
-                  afterUndo: () => navigate(`/p/${projectId}/clips/${clip.id}`),
-                });
-              },
-              onError: (e) => toast.error(e.message),
-            },
-          );
-        }}
+        onConfirm={() =>
+          delClip.mutateAsync({ id: clip.id }).then((r) => {
+            guard.allowLeave();
+            onExit();
+            notifyDeleted({
+              items: [{ kind: "clip", id: clip.id, title: title || "Untitled clip" }],
+              restorable: r.restorable,
+              storedBytes: r.storedBytes,
+              afterUndo: () => navigate(`/p/${projectId}/clips/${clip.id}`),
+            });
+          })
+        }
       />
       <ConfirmDialog
         open={styleAll !== null}

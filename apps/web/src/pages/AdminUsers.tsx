@@ -416,7 +416,12 @@ export function AdminUsersPage() {
   const targets = (a: BulkAction) => selected.filter(applies[a]);
   const selCount = allOf ? allTotal : selected.length;
   const runBulk = (action: BulkAction, reason?: string) =>
-    bulk.mutate({ action, ids: allOf ? null : targets(action).map((r) => r.id), filter: allOf ? allFilter(allOf) : undefined, reason: reason || undefined });
+    bulk.mutateAsync({
+      action,
+      ids: allOf ? null : targets(action).map((r) => r.id),
+      filter: allOf ? allFilter(allOf) : undefined,
+      reason: reason || undefined,
+    });
   /** What a bulk action acts on, for its title and its confirm: "every matching account (1,204)" or "3 accounts". */
   const scope = (a: BulkAction) => (allOf ? `${allLabel} (${num.format(allTotal)})` : accounts(targets(a).length));
   const bulkOff = (a: BulkAction) => busy || (!allMatching && targets(a).length === 0);
@@ -812,6 +817,7 @@ export function AdminUsersPage() {
             <SelectionBar
               label="Selected accounts"
               count={selCount}
+              busy={busy}
               onClear={() => {
                 setSel([]);
                 setAllOf(null);
@@ -839,7 +845,7 @@ export function AdminUsersPage() {
                 className="btn-ghost h-8"
                 disabled={bulkOff("approve")}
                 title={bulkTitle("approve", "Approve", "None of the selected accounts is waiting for approval")}
-                onClick={() => (allMatching ? setBulkConfirm("approve") : runBulk("approve"))}
+                onClick={() => (allMatching ? setBulkConfirm("approve") : void runBulk("approve").catch(() => {}))}
               >
                 Approve
               </button>
@@ -861,7 +867,7 @@ export function AdminUsersPage() {
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content side="top" align="end" sideOffset={8} className="menu w-[220px]">
-                    <DropdownMenu.Item className="menu-item" disabled={bulkOff("reinstate")} onSelect={() => runBulk("reinstate")}>
+                    <DropdownMenu.Item className="menu-item" disabled={bulkOff("reinstate")} onSelect={() => void runBulk("reinstate").catch(() => {})}>
                       Reinstate
                       {bulkOff("reinstate") && !busy && <span className="menu-hint">none suspended</span>}
                     </DropdownMenu.Item>
@@ -893,10 +899,7 @@ export function AdminUsersPage() {
         title={`Approve ${scope("approve")}?`}
         body="Every one of them that is waiting can use the app right away and is told by email. Accounts already approved stay as they are."
         confirm="Approve"
-        onConfirm={() => {
-          runBulk("approve");
-          setBulkConfirm(null);
-        }}
+        onConfirm={() => runBulk("approve")}
       />
       <ConfirmDialog
         open={bulkConfirm === "hold"}
@@ -904,10 +907,7 @@ export function AdminUsersPage() {
         title={`Require approval for ${scope("hold")}?`}
         body="From their next request they see “waiting for approval” and cannot use the app, their API keys or MCP until approved again. They are not told why, and their projects stay. Admins and your own account are left out."
         confirm="Require approval"
-        onConfirm={() => {
-          runBulk("hold");
-          setBulkConfirm(null);
-        }}
+        onConfirm={() => runBulk("hold")}
       />
       <ConfirmDialog
         open={bulkConfirm === "suspend"}
@@ -929,10 +929,7 @@ export function AdminUsersPage() {
         }
         confirm="Suspend"
         danger
-        onConfirm={() => {
-          runBulk("suspend", banReason);
-          setBulkConfirm(null);
-        }}
+        onConfirm={() => runBulk("suspend", banReason)}
       />
       <ConfirmDialog
         open={bulkConfirm === "delete"}
@@ -945,10 +942,7 @@ export function AdminUsersPage() {
         }
         confirm="Delete accounts forever"
         danger
-        onConfirm={() => {
-          runBulk("delete");
-          setBulkConfirm(null);
-        }}
+        onConfirm={() => runBulk("delete")}
       />
       <ConfirmDialog
         open={confirm?.kind === "delete"}
@@ -961,10 +955,7 @@ export function AdminUsersPage() {
         }
         confirm="Delete account forever"
         danger
-        onConfirm={() => {
-          if (confirm) remove.mutate({ id: confirm.row.id });
-          setConfirm(null);
-        }}
+        onConfirm={() => (confirm ? remove.mutateAsync({ id: confirm.row.id }) : Promise.resolve())}
       />
       <ConfirmDialog
         open={confirm?.kind === "role"}
@@ -977,10 +968,7 @@ export function AdminUsersPage() {
         }
         confirm={confirm?.row.role === "admin" ? "Remove admin" : "Make admin"}
         danger={confirm?.row.role !== "admin"}
-        onConfirm={() => {
-          if (confirm) setRole.mutate({ id: confirm.row.id, role: confirm.row.role === "admin" ? "user" : "admin" });
-          setConfirm(null);
-        }}
+        onConfirm={() => (confirm ? setRole.mutateAsync({ id: confirm.row.id, role: confirm.row.role === "admin" ? "user" : "admin" }) : Promise.resolve())}
       />
       <ConfirmDialog
         open={confirm?.kind === "hold"}
@@ -988,10 +976,7 @@ export function AdminUsersPage() {
         title={`Require approval for ${confirm?.row.email ?? "this account"}?`}
         body="From their next request they see “waiting for approval” and cannot use the app, their API keys or MCP until you approve them again. They are not told why, and their projects stay."
         confirm="Require approval"
-        onConfirm={() => {
-          if (confirm) hold.mutate({ id: confirm.row.id });
-          setConfirm(null);
-        }}
+        onConfirm={() => (confirm ? hold.mutateAsync({ id: confirm.row.id }) : Promise.resolve())}
       />
       <ConfirmDialog
         open={confirm?.kind === "ban"}
@@ -1012,10 +997,7 @@ export function AdminUsersPage() {
         }
         confirm="Suspend"
         danger
-        onConfirm={() => {
-          if (confirm) ban.mutate({ id: confirm.row.id, reason: banReason || undefined });
-          setConfirm(null);
-        }}
+        onConfirm={() => (confirm ? ban.mutateAsync({ id: confirm.row.id, reason: banReason || undefined }) : Promise.resolve())}
       />
     </ListPage>
   );
